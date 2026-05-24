@@ -13,20 +13,19 @@ By RadFast Bill
 
 Cukup jalankan **satu perintah** di VPS:
 
-**Pakai wget (direkomendasikan):**
-```bash
-wget -O /tmp/r.sh https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh && sudo bash /tmp/r.sh
-```
-
 **Pakai curl:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh -o /tmp/r.sh && sudo bash /tmp/r.sh
+curl -fsSL https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh | sudo bash
 ```
 
-> **Kenapa tidak `curl | bash` langsung?**  
-> `bash <(curl ...)` tidak jalan di LXC container (tidak ada `/dev/fd`).  
-> `curl | bash` menyebabkan prompt interaktif tidak tampil.  
-> Download ke `/tmp/r.sh` dulu adalah cara **paling kompatibel** di semua sistem.
+**Pakai wget:**
+```bash
+wget -qO- https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh | sudo bash
+```
+
+> Script otomatis mendeteksi jika dijalankan via pipe dan menanganinya  
+> sendiri — prompt interaktif tetap tampil normal di semua sistem  
+> (bare metal, VM, LXC container).
 
 > Script otomatis:
 > 1. Install Node.js 20 LTS, MongoDB 7.0/8.0, Git
