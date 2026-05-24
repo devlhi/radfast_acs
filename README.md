@@ -8,17 +8,21 @@ By RadFast Bill
 
 ## ⚡ Install (Cara Tercepat)
 
-Cukup jalankan **satu perintah** di VPS:
+Cukup jalankan **dua perintah** di VPS:
 
+**Pakai wget:**
 ```bash
-wget -qO- https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh | sudo bash
+wget -O /tmp/r.sh https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh && sudo bash /tmp/r.sh
 ```
 
-atau pakai curl:
-
+**Pakai curl:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh -o /tmp/r.sh && sudo bash /tmp/r.sh
 ```
+
+> ℹ️ **Kenapa download dulu?**  
+> Cara `curl | bash` (pipe langsung) menyebabkan layar blank karena bash menunggu  
+> koneksi ke GitHub. Download ke `/tmp/r.sh` dulu lebih aman dan tampil progress.
 
 > Script akan otomatis:
 > 1. Install Node.js 18, MongoDB 7.0, Git
@@ -71,7 +75,7 @@ sudo bash /opt/radfast_acs/remove-instance.sh namauser
 Cukup jalankan ulang perintah install — script otomatis `git pull` jika repo sudah ada:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh | sudo bash
+wget -O /tmp/r.sh https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh && sudo bash /tmp/r.sh
 ```
 
 Atau manual:

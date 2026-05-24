@@ -1,40 +1,21 @@
 #!/bin/bash
 # ============================================================
-#  RadFast ACS — One-Line Installer
+#  RadFast ACS — Bootstrap Installer
 #  By RadFast Bill
+# ============================================================
 #
-#  Usage:
-#  curl -fsSL https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh | sudo bash
-#  wget -qO-  https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh | sudo bash
+#  CARA INSTALL (copy salah satu):
+#
+#  wget -O /tmp/r.sh https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh && bash /tmp/r.sh
+#  curl -fsSL     https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh -o /tmp/r.sh && bash /tmp/r.sh
+#
 # ============================================================
 
-# ── Fix pipe mode ─────────────────────────────────────────────
-# Ketika dijalankan via "curl | bash" atau "wget | bash":
-# bash membaca SCRIPT dari stdin (pipe). Kalau kita pakai
-# "exec < /dev/tty" di sini, bash ganti sumber baca dari pipe
-# ke terminal → sisa script hilang → hang blank.
-#
-# Solusi: download script ke file temp, lalu exec dari file
-# dengan stdin diarahkan ke /dev/tty (terminal).
+# ── Jika masih dijalankan via pipe lama (curl|bash / wget|bash)
+#    bootstrap ini minimal — langsung download ke file lalu exec
 # ─────────────────────────────────────────────────────────────
-SELF_URL="https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh"
+_MAIN() {
 
-if [ ! -t 0 ]; then
-    TMPSCRIPT=$(mktemp /tmp/radfast_XXXXXX.sh)
-    printf '\033[0;36m[RadFast]\033[0m Download installer...\n'
-    if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "$SELF_URL" -o "$TMPSCRIPT" 2>/dev/null
-    elif command -v wget >/dev/null 2>&1; then
-        wget -qO "$TMPSCRIPT" "$SELF_URL" 2>/dev/null
-    else
-        printf '\033[0;31m[ERR]\033[0m curl/wget tidak tersedia!\n'; exit 1
-    fi
-    chmod +x "$TMPSCRIPT"
-    # Jalankan dari FILE (bukan pipe) + stdin dari terminal
-    exec bash "$TMPSCRIPT" < /dev/tty
-fi
-
-# ── Script berjalan normal (dari file / terminal) ─────────────
 set -euo pipefail
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; CYAN='\033[0;36m'
@@ -49,35 +30,30 @@ success() { echo -e "${GREEN}[ OK ]${NC} $*"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error()   { echo -e "${RED}[ERR ]${NC} $*"; exit 1; }
 
-# ── Progress bar ──────────────────────────────────────────────
 show_progress() {
     local step=$1 total=$2 label="$3"
     local pct=$(( step * 100 / total ))
     local filled=$(( step * 30 / total ))
     local empty=$(( 30 - filled ))
-    local bar=""
+    local bar="" i
     for ((i=0; i<filled; i++)); do bar+="█"; done
     for ((i=0; i<empty;  i++)); do bar+="░"; done
     printf "  ${CYAN}[%s]${NC} ${BOLD}%3d%%${NC}  %s\n" "$bar" "$pct" "$label"
 }
 
-# ── Spinner untuk proses silent ───────────────────────────────
 SPINNER_PID=""
 spinner_start() {
-    local msg="$1"
     ( sp='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'; i=0
       while true; do
-          printf "\r  ${CYAN}%s${NC}  %s " "${sp:i++%${#sp}:1}" "$msg"
+          printf "\r  ${CYAN}%s${NC}  %s " "${sp:i++%${#sp}:1}" "$1"
           sleep 0.1
       done ) &
     SPINNER_PID=$!
     disown "$SPINNER_PID" 2>/dev/null || true
 }
 spinner_stop() {
-    [[ -n "${SPINNER_PID:-}" ]] && kill "$SPINNER_PID" 2>/dev/null || true
-    wait "$SPINNER_PID" 2>/dev/null || true
-    SPINNER_PID=""
-    printf "\r%-70s\r" " "
+    [[ -n "${SPINNER_PID:-}" ]] && kill "$SPINNER_PID" 2>/dev/null; wait "$SPINNER_PID" 2>/dev/null || true
+    SPINNER_PID=""; printf "\r%-70s\r" " "
 }
 
 # ── Banner ────────────────────────────────────────────────────
@@ -89,23 +65,20 @@ echo -e "${BOLD}${CYAN}║${NC}  GenieACS v1.2.16 • Multi-Instance • By RadF
 echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
-[[ $EUID -ne 0 ]] && error "Jalankan sebagai root: sudo bash"
+[[ $EUID -ne 0 ]] && error "Jalankan sebagai root: sudo bash /tmp/r.sh"
 
 # ── Step 1: Deteksi OS ────────────────────────────────────────
 show_progress 1 $PROG_TOTAL "Deteksi OS..."
 [[ -f /etc/os-release ]] && . /etc/os-release || true
 OS_ID="${ID:-unknown}"; OS_VER="${VERSION_ID:-?}"
 
-if [[ "$OS_ID" == "ubuntu" || "$OS_ID" == "debian" ]]; then
-    PKG="apt-get"
-elif [[ -f /etc/redhat-release ]]; then
-    PKG="yum"; OS_ID="rhel"
-else
-    error "OS tidak didukung. Butuh Ubuntu 20/22/24 atau RHEL/CentOS."
+if   [[ "$OS_ID" == "ubuntu" || "$OS_ID" == "debian" ]]; then PKG="apt-get"
+elif [[ -f /etc/redhat-release ]]; then PKG="yum"; OS_ID="rhel"
+else error "OS tidak didukung. Butuh Ubuntu 20/22/24 atau RHEL/CentOS."
 fi
 success "OS: ${OS_ID^} $OS_VER"
 
-# ── Step 2: Update & install dependensi ───────────────────────
+# ── Step 2: Update & dependensi ───────────────────────────────
 show_progress 2 $PROG_TOTAL "Update paket & install dependensi..."
 
 if [[ "$PKG" == "apt-get" ]]; then
@@ -117,28 +90,23 @@ fi
 NEED=""
 command -v git  &>/dev/null || NEED="$NEED git"
 command -v curl &>/dev/null || NEED="$NEED curl"
-
 if [[ -n "$NEED" ]]; then
-    spinner_start "Menginstall:$NEED ..."
+    spinner_start "Install:$NEED ..."
     [[ "$PKG" == "apt-get" ]] && apt-get install -y -qq $NEED || yum install -y -q $NEED
-    spinner_stop
-    success "Terinstall:$NEED"
+    spinner_stop; success "Terinstall:$NEED"
 else
     success "git & curl sudah tersedia"
 fi
 
 # ── Step 3: Clone / Update repo ───────────────────────────────
 show_progress 3 $PROG_TOTAL "Download RadFast ACS dari GitHub..."
-
 if [[ -d "$REPO_DIR/.git" ]]; then
     spinner_start "Update repo..."
     git -C "$REPO_DIR" pull --ff-only 2>&1 | tail -1
-    spinner_stop
-    success "Repo diupdate"
+    spinner_stop; success "Repo diupdate"
 else
     info "Clone repo ke $REPO_DIR ..."
-    git clone --progress "$REPO_URL" "$REPO_DIR" 2>&1 | \
-        grep -E "Counting|Receiving|Resolving|done\." || true
+    git clone --progress "$REPO_URL" "$REPO_DIR" 2>&1 | grep -E "Counting|Receiving|Resolving|done\." || true
     success "Repo di-clone"
 fi
 chmod +x "$REPO_DIR/"*.sh 2>/dev/null || true
@@ -156,22 +124,41 @@ echo -e "${GREEN}${BOLD}╔═════════════════�
 echo -e "${GREEN}${BOLD}║  ✅  RadFast ACS berhasil diinstall!                     ║${NC}"
 echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "  Script dir  : ${CYAN}$REPO_DIR${NC}"
-echo -e "  Shortcut    : ${CYAN}radfast-status${NC}  ${CYAN}radfast-list${NC}  ${CYAN}radfast-add${NC}"
+echo -e "  Shortcut : ${CYAN}radfast-status${NC}  ${CYAN}radfast-list${NC}  ${CYAN}radfast-add${NC}"
 echo ""
 
-# ── Tambah instance sekarang? ─────────────────────────────────
 read -rp "$(echo -e "${YELLOW}  Tambah instance/user sekarang? [Y/n]: ${NC}")" ADD_NOW
 ADD_NOW="${ADD_NOW:-Y}"
-
 if [[ "$ADD_NOW" =~ ^[Yy]$ ]]; then
-    echo ""
-    bash "$REPO_DIR/add-instance.sh"
+    echo ""; bash "$REPO_DIR/add-instance.sh"
 else
     echo ""
-    echo -e "  Tambah user nanti:"
-    echo -e "  ${CYAN}sudo radfast-add${NC}"
-    echo -e "  ${CYAN}radfast-list${NC}     ← lihat semua instance"
-    echo -e "  ${CYAN}radfast-status${NC}   ← monitor resource"
+    echo -e "  Tambah nanti: ${CYAN}sudo radfast-add${NC}"
+    echo -e "  List       : ${CYAN}radfast-list${NC}"
     echo ""
+fi
+
+} # end _MAIN
+
+# ══════════════════════════════════════════════════════════════
+#  ENTRYPOINT — deteksi pipe vs file
+# ══════════════════════════════════════════════════════════════
+if [ ! -t 0 ]; then
+    # Dijalankan via pipe: stdin bukan terminal
+    # Tidak bisa jalankan _MAIN di sini karena bash masih baca
+    # script dari pipe. Unduh ke file dulu, exec dari file.
+    SELF="https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh"
+    TMP=$(mktemp /tmp/radfast_XXXXXX.sh)
+    printf '\033[1;33m[RadFast]\033[0m Mendownload installer ke %s\n' "$TMP"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --progress-bar "$SELF" -o "$TMP"
+    else
+        wget --show-progress -qO "$TMP" "$SELF" 2>&1 || wget -O "$TMP" "$SELF"
+    fi
+    chmod +x "$TMP"
+    printf '\033[0;32m[ OK ]\033[0m Download selesai. Menjalankan installer...\n\n'
+    exec bash "$TMP" </dev/tty
+else
+    # Dijalankan langsung dari file (bash /tmp/r.sh) — jalan normal
+    _MAIN
 fi
