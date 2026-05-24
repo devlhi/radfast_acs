@@ -174,10 +174,28 @@ function validateMagic(buf, ext) {
         return buf.length >= 3 &&
             buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF;
     }
+    if (ext === '.gif') {
+        // GIF87a atau GIF89a
+        return buf.length >= 6 &&
+            buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46 &&
+            buf[3] === 0x38 && (buf[4] === 0x37 || buf[4] === 0x39) && buf[5] === 0x61;
+    }
+    if (ext === '.webp') {
+        // RIFF....WEBP
+        return buf.length >= 12 &&
+            buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
+            buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50;
+    }
+    if (ext === '.ico') {
+        return buf.length >= 4 &&
+            buf[0] === 0x00 && buf[1] === 0x00 &&
+            buf[2] === 0x01 && buf[3] === 0x00;
+    }
+    if (ext === '.bmp') {
+        return buf.length >= 2 && buf[0] === 0x42 && buf[1] === 0x4D;
+    }
     if (ext === '.svg') {
-        // SVG harus teks valid, tidak boleh binary
         const head = buf.slice(0, 512).toString('utf-8', 0, 512);
-        // Cek ada tag SVG dan tidak ada byte null (binary injection)
         return !buf.slice(0, 512).includes(0x00) &&
                (/<svg[\s>]/i.test(head) || /^<\?xml/i.test(head));
     }
@@ -268,11 +286,17 @@ const MIME = {
     '.svg'  : 'image/svg+xml',
     '.png'  : 'image/png',
     '.jpg'  : 'image/jpeg',
-    '.jpeg' : 'image/jpeg'
+    '.jpeg' : 'image/jpeg',
+    '.gif'  : 'image/gif',
+    '.webp' : 'image/webp',
+    '.ico'  : 'image/x-icon',
+    '.bmp'  : 'image/bmp'
 };
 
+const ALLOWED_EXT = ['.svg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.bmp'];
+
 function findCustomLogo() {
-    for (const ext of ['.svg', '.png', '.jpg', '.jpeg']) {
+    for (const ext of ALLOWED_EXT) {
         const f = LOGO_BASE + ext;
         if (fs.existsSync(f)) return f;
     }
@@ -280,7 +304,7 @@ function findCustomLogo() {
 }
 
 function deleteAllLogo() {
-    for (const ext of ['.svg', '.png', '.jpg', '.jpeg']) {
+    for (const ext of ALLOWED_EXT) {
         try { fs.unlinkSync(LOGO_BASE + ext); } catch(_) {}
     }
 }
@@ -355,8 +379,8 @@ function uploadPage(msg = '', authed = false) {
   <form method="POST" action="/__admin/logo/upload" enctype="multipart/form-data" autocomplete="off">
     ${tokenField}
     <label>📁 File Logo</label>
-    <small style="color:#888;font-size:12px">SVG / PNG / JPG · maks 2 MB</small>
-    <input type="file" name="logo" accept=".svg,.png,.jpg,.jpeg" required>
+    <small style="color:#888;font-size:12px">SVG / PNG / JPG / GIF / WebP / ICO / BMP · maks 2 MB</small>
+    <input type="file" name="logo" accept=".svg,.png,.jpg,.jpeg,.gif,.webp,.ico,.bmp" required>
     <button type="submit" class="btn g">⬆ Upload Logo</button>
   </form>
 
@@ -461,9 +485,13 @@ function proxyRequest(req, res) {
                 // Inject tombol sebelum </body>
                 if (html.includes('</body>')) {
                     html = html.replace('</body>', FLOATING_BTN + '</body>');
+                } else if (html.includes('</html>')) {
+                    html = html.replace('</html>', FLOATING_BTN + '</html>');
                 } else {
-                    html += FLOATING_BTN; // fallback kalau tidak ada </body>
+                    // Fallback: append di akhir
+                    html += FLOATING_BTN;
                 }
+                console.log(`[proxy] inject btn → ${req.url} (${html.length} bytes)`);
 
                 // Hapus content-length lama (sudah berubah) & content-encoding
                 const respHeaders = { ...pRes.headers };
@@ -599,11 +627,10 @@ const server = http.createServer((req, res) => {
 
                 // ── Tentukan ekstensi dari nama file ────────
                 const origExt = path.extname(file.filename || '').toLowerCase();
-                const allowed = ['.svg', '.png', '.jpg', '.jpeg'];
-                if (!allowed.includes(origExt)) {
+                if (!ALLOWED_EXT.includes(origExt)) {
                     recordFail(ip, `Ekstensi tidak diizinkan: ${origExt}`);
                     sendSecure(res, 400, 'text/html; charset=utf-8',
-                        uploadPage('<div class="msg er">❌ Format tidak didukung. Gunakan SVG, PNG, atau JPG.</div>'));
+                        uploadPage('<div class="msg er">❌ Format tidak didukung. Gunakan SVG, PNG, JPG, GIF, WebP, ICO, atau BMP.</div>'));
                     return;
                 }
 
@@ -694,7 +721,9 @@ const server = http.createServer((req, res) => {
     }
 
     // ── Intercept logo GenieACS → serve custom jika ada ───
-    if (/\/public\/logo-[^/]+\.(svg|png|jpe?g)/i.test(req.url)) {
+    // Match semua variasi URL logo GenieACS:
+    // /public/logo.svg, /public/logo-abc.svg, /public/logo-white.svg, dll
+    if (/\/public\/logo[^/]*\.(svg|png|jpe?g|gif|webp|ico|bmp)/i.test(req.url)) {
         const custom = findCustomLogo();
         if (custom) {
             const ext = path.extname(custom).toLowerCase();
