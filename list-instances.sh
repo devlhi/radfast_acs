@@ -45,9 +45,11 @@ while IFS= read -r line; do
     echo -e "  ├─ FS   File Server        : $IP:$FS"
     echo -e "  ├─ Database                : $DB"
 
+    echo -e "  ├─ 🖼  Upload Logo             : ${CYAN}http://$IP:$UI/__admin/logo${NC}"
+
     # Cek status services
     STATUS_LINE=""
-    for SVC in cwmp fs nbi ui; do
+    for SVC in cwmp fs nbi ui proxy; do
         if systemctl is-active --quiet "genieacs-${NAME}-${SVC}" 2>/dev/null; then
             STATUS_LINE+="${GREEN}${SVC}✓${NC} "
         else

@@ -20,6 +20,7 @@ error()   { echo -e "${RED}[ERR]${NC}  $*"; exit 1; }
 APP_DIR="/opt/genieacs-app"
 INSTANCES_DIR="/opt/genieacs-instances"
 REGISTRY="$INSTANCES_DIR/.registry"
+REPO_DIR="/opt/radfast_acs"
 
 [[ ! -d "$APP_DIR" ]]       && error "App tidak ada di $APP_DIR. Jalankan setup-system.sh dulu!"
 [[ ! -d "$INSTANCES_DIR" ]] && error "Folder instances tidak ada. Jalankan setup-system.sh dulu!"
@@ -33,51 +34,52 @@ else
 fi
 
 USERNAME=$(echo "$USERNAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')
-[[ -z "$USERNAME" ]]            && error "Username tidak valid! Hanya huruf kecil, angka, - dan _"
-[[ ${#USERNAME} -lt 2 ]]        && error "Username minimal 2 karakter!"
-[[ -d "$INSTANCES_DIR/$USERNAME" ]] && error "Instance '$USERNAME' sudah ada! Gunakan nama lain."
+[[ -z "$USERNAME" ]]                       && error "Username tidak valid! Hanya huruf kecil, angka, - dan _"
+[[ ${#USERNAME} -lt 2 ]]                   && error "Username minimal 2 karakter!"
+[[ -d "$INSTANCES_DIR/$USERNAME" ]]        && error "Instance '$USERNAME' sudah ada! Gunakan nama lain."
 
 # ── Cari port yang benar-benar bebas ─────────────────────────
-# Kumpulkan semua port yang sudah dipakai (dari .env + sistem)
 all_used_ports() {
-    # Port dari instances yang sudah ada
     if [[ -d "$INSTANCES_DIR" ]]; then
         grep -rh "_PORT=" "$INSTANCES_DIR/"*"/.env" 2>/dev/null \
             | grep -oP '=\K[0-9]+$' || true
     fi
-    # Port yang sedang listen di sistem
     ss -tlnp 2>/dev/null | grep -oP '(?<=:)\d+(?= )' || \
     netstat -tlnp 2>/dev/null | grep -oP ':\K[0-9]+(?= )' || true
 }
 
-# Build set port yang dipakai
 USED_PORTS=$(all_used_ports | sort -un)
 
-is_used() {
-    echo "$USED_PORTS" | grep -qx "$1"
-}
+is_used() { echo "$USED_PORTS" | grep -qx "$1"; }
 
 next_free_from() {
     local p=$1
     while is_used "$p"; do p=$((p + 1)); done
-    # Tandai sebagai sudah dipakai supaya 4 port tidak ambil nomor sama
     USED_PORTS=$(printf "%s\n%s" "$USED_PORTS" "$p" | sort -un)
     echo "$p"
 }
 
+# Port public (yang diakses user)
 UI_PORT=$(next_free_from 3001)
 CWMP_PORT=$(next_free_from 7548)
 NBI_PORT=$(next_free_from 7558)
 FS_PORT=$(next_free_from 7568)
 
-# ── JWT secret & info ────────────────────────────────────────
+# Port internal GenieACS UI (dipakai logo-proxy, user tidak akses langsung)
+# Pakai rentang 13000+ supaya tidak bentrok
+UI_INTERNAL=$(next_free_from $((UI_PORT + 10000)))
+
+# ── Secret & info ────────────────────────────────────────────
 JWT_SECRET=$(openssl rand -hex 32 2>/dev/null || \
              od -An -tx1 /dev/urandom | head -2 | tr -d ' \n' | cut -c1-64)
+ADMIN_TOKEN=$(openssl rand -hex 16 2>/dev/null || \
+              od -An -tx1 /dev/urandom | head -1 | tr -d ' \n' | cut -c1-32)
 
 DB_NAME="genieacs_${USERNAME}"
 INST_DIR="$INSTANCES_DIR/$USERNAME"
+LOGO_BASE="$INST_DIR/logo/custom-logo"
 
-# Deteksi IP server (fallback chain)
+# Deteksi IP server
 SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}') || \
 SERVER_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[\d.]+') || \
 SERVER_IP="127.0.0.1"
@@ -98,19 +100,29 @@ CONFIRM="${CONFIRM:-Y}"
 [[ ! "$CONFIRM" =~ ^[Yy]$ ]] && echo "Dibatalkan." && exit 0
 
 # ── Buat folder instance ─────────────────────────────────────
-mkdir -p "$INST_DIR"
+mkdir -p "$INST_DIR" "$INST_DIR/logo"
 
 # ── Tulis .env ───────────────────────────────────────────────
 cat > "$INST_DIR/.env" <<EOF
 # GenieACS instance: ${USERNAME}
 # Generated: $(date '+%Y-%m-%d %H:%M:%S')
+
+# Database
 GENIEACS_MONGODB_CONNECTION_URL=mongodb://127.0.0.1:27017/${DB_NAME}
+
+# Port internal GenieACS (tidak langsung diakses user)
 GENIEACS_CWMP_PORT=${CWMP_PORT}
 GENIEACS_NBI_PORT=${NBI_PORT}
 GENIEACS_FS_PORT=${FS_PORT}
-GENIEACS_UI_PORT=${UI_PORT}
+GENIEACS_UI_PORT=${UI_INTERNAL}
 GENIEACS_FS_HOSTNAME=${SERVER_IP}
 GENIEACS_UI_JWT_SECRET=${JWT_SECRET}
+
+# Logo Proxy (akses publik UI via proxy)
+RADFAST_PROXY_PORT=${UI_PORT}
+RADFAST_UI_INTERNAL=${UI_INTERNAL}
+RADFAST_LOGO_FILE=${LOGO_BASE}
+RADFAST_ADMIN_TOKEN=${ADMIN_TOKEN}
 EOF
 success ".env dibuat"
 
@@ -124,29 +136,32 @@ if [[ -d "$CONF_DIR" ]]; then
         success "MongoDB diimport ke $DB_NAME"
     else
         warn "mongorestore tidak ditemukan — skip import MongoDB"
-        warn "Install manual: apt install mongodb-database-tools"
-        warn "Lalu: mongorestore --db $DB_NAME --drop $CONF_DIR"
     fi
 else
     warn "conf-acs tidak ditemukan di $APP_DIR — skip import MongoDB"
 fi
 
-# ── Cari node binary ─────────────────────────────────────────
+# ── Cari node & proxy script ─────────────────────────────────
 NODE_BIN=$(command -v node 2>/dev/null || echo "/usr/bin/node")
-[[ ! -f "$NODE_BIN" ]] && error "node binary tidak ditemukan di $NODE_BIN"
+[[ ! -f "$NODE_BIN" ]] && error "node binary tidak ditemukan!"
+
+# Cari logo-proxy.js
+PROXY_SCRIPT=""
+for loc in "$REPO_DIR/logo-proxy.js" "$(dirname "$0")/logo-proxy.js" "/opt/radfast_acs/logo-proxy.js"; do
+    [[ -f "$loc" ]] && PROXY_SCRIPT="$loc" && break
+done
+[[ -z "$PROXY_SCRIPT" ]] && warn "logo-proxy.js tidak ditemukan — fitur upload logo tidak aktif"
 
 # ── Buat systemd services ────────────────────────────────────
 info "Membuat systemd services..."
 
-declare -A SVC_PORTS=(
-    [cwmp]=$CWMP_PORT
-    [fs]=$FS_PORT
-    [nbi]=$NBI_PORT
-    [ui]=$UI_PORT
-)
-
 for SVC in cwmp fs nbi ui; do
-    PORT="${SVC_PORTS[$SVC]}"
+    case $SVC in
+        cwmp) PORT=$CWMP_PORT ;;
+        fs)   PORT=$FS_PORT ;;
+        nbi)  PORT=$NBI_PORT ;;
+        ui)   PORT=$UI_INTERNAL ;;
+    esac
     cat > "/etc/systemd/system/genieacs-${USERNAME}-${SVC}.service" <<EOF
 [Unit]
 Description=GenieACS ${SVC^^} — ${USERNAME} (port ${PORT})
@@ -170,34 +185,62 @@ WantedBy=multi-user.target
 EOF
 done
 
+# Service proxy (UI publik + logo upload)
+if [[ -n "$PROXY_SCRIPT" ]]; then
+    cat > "/etc/systemd/system/genieacs-${USERNAME}-proxy.service" <<EOF
+[Unit]
+Description=GenieACS UI Proxy — ${USERNAME} (port ${UI_PORT})
+After=network.target genieacs-${USERNAME}-ui.service
+Requires=genieacs-${USERNAME}-ui.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=${INST_DIR}
+EnvironmentFile=${INST_DIR}/.env
+ExecStart=${NODE_BIN} ${PROXY_SCRIPT}
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=genieacs-${USERNAME}-proxy
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    success "Service proxy dibuat (port $UI_PORT)"
+else
+    warn "Service proxy tidak dibuat (logo-proxy.js tidak ditemukan)"
+fi
+
 systemctl daemon-reload
-success "4 systemd services dibuat"
+success "Systemd services dibuat"
 
 # ── Enable & Start services ──────────────────────────────────
 info "Menjalankan services..."
 ALL_OK=true
+SERVICES="cwmp fs nbi ui"
+[[ -n "$PROXY_SCRIPT" ]] && SERVICES="$SERVICES proxy"
 
-for SVC in cwmp fs nbi ui; do
-    systemctl enable "genieacs-${USERNAME}-${SVC}" &>/dev/null 2>&1 || true
-    if systemctl start "genieacs-${USERNAME}-${SVC}" 2>/dev/null; then
+for SVC in $SERVICES; do
+    SVCNAME="genieacs-${USERNAME}-${SVC}"
+    systemctl enable "$SVCNAME" &>/dev/null 2>&1 || true
+    if systemctl start "$SVCNAME" 2>/dev/null; then
         sleep 1
-        if systemctl is-active --quiet "genieacs-${USERNAME}-${SVC}" 2>/dev/null; then
-            success "genieacs-${USERNAME}-${SVC}  ✓ running"
+        if systemctl is-active --quiet "$SVCNAME" 2>/dev/null; then
+            success "$SVCNAME  ✓"
         else
-            warn "genieacs-${USERNAME}-${SVC}  ✗ start tapi langsung berhenti"
-            warn "  Cek: journalctl -u genieacs-${USERNAME}-${SVC} -n 20 --no-pager"
+            warn "$SVCNAME  ✗ (cek: journalctl -u $SVCNAME -n 20)"
             ALL_OK=false
         fi
     else
-        warn "genieacs-${USERNAME}-${SVC}  ✗ gagal start"
-        warn "  Cek: journalctl -u genieacs-${USERNAME}-${SVC} -n 20 --no-pager"
+        warn "$SVCNAME  ✗ gagal start"
         ALL_OK=false
     fi
 done
 
 # ── Simpan ke registry ───────────────────────────────────────
 touch "$REGISTRY"
-# Hapus entri lama (kalau ada duplikat)
 grep -v "^${USERNAME} " "$REGISTRY" > "${REGISTRY}.tmp" 2>/dev/null \
     && mv "${REGISTRY}.tmp" "$REGISTRY" || rm -f "${REGISTRY}.tmp"
 echo "${USERNAME} UI=${UI_PORT} CWMP=${CWMP_PORT} NBI=${NBI_PORT} FS=${FS_PORT} DB=${DB_NAME} IP=${SERVER_IP} DATE=$(date '+%Y-%m-%d')" \
@@ -214,28 +257,29 @@ fi
 echo -e "${GREEN}${BOLD}============================================================${NC}"
 echo ""
 echo -e "  ${BOLD}Akses & Info Port:${NC}"
-echo -e "  ┌─────────────────────────────────────────────────────┐"
-echo -e "  │ UI   (Dashboard Web)                                │"
+echo -e "  ┌──────────────────────────────────────────────────────┐"
+echo -e "  │ UI   (Dashboard Web)                                 │"
 echo -e "  │   → ${CYAN}http://${SERVER_IP}:${UI_PORT}${NC}"
-echo -e "  │   Buka di browser untuk kelola device               │"
-echo -e "  ├─────────────────────────────────────────────────────┤"
-echo -e "  │ CWMP  (TR-069 Device/CPE)    port ${CWMP_PORT}              │"
-echo -e "  │   Arahkan ACS URL device ke:                        │"
-echo -e "  │   → http://${SERVER_IP}:${CWMP_PORT}                   │"
-echo -e "  ├─────────────────────────────────────────────────────┤"
-echo -e "  │ NBI   (REST API / Integrasi)  port ${NBI_PORT}              │"
-echo -e "  │   Untuk akses API dari sistem lain (billing, dll)   │"
-echo -e "  │   → http://${SERVER_IP}:${NBI_PORT}                   │"
-echo -e "  ├─────────────────────────────────────────────────────┤"
-echo -e "  │ FS    (File Server firmware)  port ${FS_PORT}              │"
-echo -e "  │   Otomatis dipakai saat push file/firmware ke device │"
-echo -e "  └─────────────────────────────────────────────────────┘"
+echo -e "  │   Buka di browser untuk kelola device                │"
+echo -e "  ├──────────────────────────────────────────────────────┤"
+echo -e "  │ 🖼  Upload Logo (tanpa terminal)                     │"
+echo -e "  │   → ${CYAN}http://${SERVER_IP}:${UI_PORT}/__admin/logo${NC}"
+echo -e "  │   Token: ${YELLOW}${ADMIN_TOKEN}${NC}"
+echo -e "  ├──────────────────────────────────────────────────────┤"
+echo -e "  │ CWMP  (TR-069 Device/CPE)     port ${CWMP_PORT}               │"
+echo -e "  │   ACS URL device: http://${SERVER_IP}:${CWMP_PORT}    │"
+echo -e "  ├──────────────────────────────────────────────────────┤"
+echo -e "  │ NBI   (REST API / Integrasi)   port ${NBI_PORT}               │"
+echo -e "  │   http://${SERVER_IP}:${NBI_PORT}                    │"
+echo -e "  ├──────────────────────────────────────────────────────┤"
+echo -e "  │ FS    (File Server firmware)   port ${FS_PORT}               │"
+echo -e "  └──────────────────────────────────────────────────────┘"
 echo ""
 echo -e "  Database : ${DB_NAME}"
 echo -e "  Folder   : ${INST_DIR}"
 echo ""
 echo -e "  ${BOLD}Manage:${NC}"
-echo -e "  ${YELLOW}systemctl status  genieacs-${USERNAME}-ui${NC}"
-echo -e "  ${YELLOW}journalctl -u genieacs-${USERNAME}-ui -f${NC}"
+echo -e "  ${YELLOW}systemctl status genieacs-${USERNAME}-ui${NC}"
+echo -e "  ${YELLOW}journalctl -u genieacs-${USERNAME}-proxy -f${NC}"
 echo -e "  ${YELLOW}sudo bash /opt/radfast_acs/remove-instance.sh ${USERNAME}${NC}"
 echo "============================================================"

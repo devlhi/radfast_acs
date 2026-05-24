@@ -66,7 +66,7 @@ read -rp "$(echo -e "${RED}Ketik nama instance untuk konfirmasi: ${NC}")" CONFIR
 
 # ── Stop & disable services ──────────────────────────────────
 info "Menghentikan services..."
-for SVC in ui nbi fs cwmp; do
+for SVC in proxy ui nbi fs cwmp; do
     SVCNAME="genieacs-${USERNAME}-${SVC}"
     if systemctl list-units --full --all 2>/dev/null | grep -q "$SVCNAME"; then
         systemctl stop    "$SVCNAME" 2>/dev/null || true
