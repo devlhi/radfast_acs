@@ -48,8 +48,25 @@ function backupOriginalLogos() {
     }
 }
 
+// Bungkus PNG/JPG/GIF/WebP dalam SVG agar bisa replace file .svg
+// tanpa merusak format (browser expect SVG, kita embed image di dalamnya)
+function wrapInSVG(imageData, ext) {
+    const mimeType = MIME[ext] || 'image/png';
+    const b64 = imageData.toString('base64');
+    return Buffer.from(
+        `<svg xmlns="http://www.w3.org/2000/svg" ` +
+        `xmlns:xlink="http://www.w3.org/1999/xlink" ` +
+        `viewBox="0 0 300 100" preserveAspectRatio="xMidYMid meet">` +
+        `<image href="data:${mimeType};base64,${b64}" ` +
+        `x="0" y="0" width="300" height="100" ` +
+        `preserveAspectRatio="xMidYMid meet"/>` +
+        `</svg>`
+    );
+}
+
 // Terapkan custom logo ke folder public GenieACS
 // Semua file logo-*.svg di public diganti dengan custom logo
+// Kalau upload bukan SVG → bungkus dalam SVG wrapper dulu
 function applyLogoToApp(logoFile) {
     backupOriginalLogos();
     const targets = findAppLogoFiles();
@@ -57,12 +74,22 @@ function applyLogoToApp(logoFile) {
         console.warn('[logo] Tidak ada file logo di', APP_PUBLIC);
         return;
     }
+
+    const ext = path.extname(logoFile).toLowerCase();
+    let fileData = fs.readFileSync(logoFile);
+
+    // Kalau bukan SVG, bungkus dalam SVG supaya browser bisa render
+    if (ext !== '.svg') {
+        fileData = wrapInSVG(fileData, ext);
+        console.log(`[logo] Wrapped ${ext} → SVG untuk app/public`);
+    }
+
     for (const target of targets) {
         try {
-            fs.copyFileSync(logoFile, target);
+            fs.writeFileSync(target, fileData);
             console.log('[logo] Applied custom logo →', target);
         } catch(e) {
-            console.error('[logo] Gagal copy ke', target, ':', e.message);
+            console.error('[logo] Gagal write ke', target, ':', e.message);
         }
     }
 }
