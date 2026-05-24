@@ -518,61 +518,290 @@ function parseMultipart(body, boundary) {
 //  Inject link "🖼 Logo" sejajar dengan tab nav yang ada.
 //  Tidak menggunakan position:fixed agar tidak nutup konten.
 // ════════════════════════════════════════════════════════════
-const NAV_INJECT = `<style>
-#radfast-logo-nav{
-  color:inherit;text-decoration:none;
-  padding:0 12px;opacity:.75;
-  font-size:inherit;white-space:nowrap;
+const NAV_INJECT = `
+<style>
+/* ── Modal backdrop ── */
+#rf-modal-backdrop{
+  display:none;position:fixed;inset:0;z-index:99998;
+  background:rgba(0,0,0,.45);
+  align-items:center;justify-content:center;
 }
-#radfast-logo-nav:hover{opacity:1;text-decoration:underline}
+#rf-modal-backdrop.open{display:flex}
+
+/* ── Modal box — ikuti style GenieACS (beige header) ── */
+#rf-modal{
+  background:#fff;border-radius:4px;
+  box-shadow:0 4px 24px rgba(0,0,0,.25);
+  width:400px;max-width:94vw;
+  font-family:Arial,sans-serif;font-size:14px;
+  overflow:hidden;
+}
+#rf-modal-head{
+  background:#d4c89a;padding:10px 16px;
+  display:flex;align-items:center;justify-content:space-between;
+  border-bottom:1px solid #b8ae82;
+}
+#rf-modal-head h3{margin:0;font-size:15px;color:#333;font-weight:bold}
+#rf-modal-close{
+  background:none;border:none;font-size:20px;cursor:pointer;
+  color:#555;line-height:1;padding:0 4px;
+}
+#rf-modal-close:hover{color:#000}
+#rf-modal-body{padding:18px}
+
+/* Preview logo */
+#rf-preview-wrap{
+  text-align:center;border:1px solid #e0e0e0;
+  border-radius:4px;padding:10px;margin-bottom:14px;
+  background:#fafafa;min-height:60px;
+  display:flex;align-items:center;justify-content:center;
+}
+#rf-preview-wrap img{max-height:60px;max-width:100%;object-fit:contain}
+#rf-preview-wrap span{color:#aaa;font-size:13px}
+
+/* File input area */
+#rf-file-area{
+  border:2px dashed #c8c0a0;border-radius:4px;
+  padding:12px;text-align:center;cursor:pointer;
+  transition:border-color .2s;margin-bottom:12px;
+  background:#fffdf5;
+}
+#rf-file-area:hover,#rf-file-area.drag{border-color:#8a7d50}
+#rf-file-area input{display:none}
+#rf-file-area label{cursor:pointer;color:#555;font-size:13px}
+#rf-file-name{font-size:12px;color:#888;margin-top:4px}
+
+/* Buttons */
+#rf-modal-body .rf-btn{
+  display:inline-block;padding:7px 18px;border:none;
+  border-radius:3px;cursor:pointer;font-size:13px;
+  font-weight:bold;transition:opacity .15s;
+}
+#rf-modal-body .rf-btn:hover{opacity:.85}
+.rf-btn-primary{background:#5a8a2a;color:#fff}
+.rf-btn-danger{background:#c0392b;color:#fff;font-size:12px;padding:5px 12px}
+.rf-btn-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+
+/* Status message */
+#rf-msg{
+  padding:7px 10px;border-radius:3px;margin-bottom:10px;
+  font-size:13px;display:none;
+}
+#rf-msg.ok{background:#dff0d8;color:#2d6a0f;border:1px solid #b8dca0;display:block}
+#rf-msg.er{background:#f2dede;color:#8b1a1a;border:1px solid #e0b0b0;display:block}
+
+/* Nav link */
+#rf-nav-btn{
+  color:inherit;text-decoration:none;
+  padding:0 10px;font-size:inherit;
+  cursor:pointer;background:none;border:none;
+}
+#rf-nav-btn:hover{text-decoration:underline}
 </style>
+
+<!-- Modal HTML -->
+<div id="rf-modal-backdrop">
+  <div id="rf-modal">
+    <div id="rf-modal-head">
+      <h3>&#128444; Upload Logo</h3>
+      <button id="rf-modal-close" title="Tutup">&times;</button>
+    </div>
+    <div id="rf-modal-body">
+      <div id="rf-msg"></div>
+      <div id="rf-preview-wrap">
+        <span>Memuat logo...</span>
+      </div>
+      <div id="rf-file-area">
+        <input type="file" id="rf-file-input" accept=".svg,.png,.jpg,.jpeg,.gif,.webp,.ico,.bmp">
+        <label for="rf-file-input">&#128194; Klik atau drag file ke sini</label>
+        <div id="rf-file-name">SVG / PNG / JPG / GIF / WebP &mdash; maks 2 MB</div>
+      </div>
+      <div class="rf-btn-row">
+        <button class="rf-btn rf-btn-primary" id="rf-upload-btn">&#8679; Upload Logo</button>
+        <button class="rf-btn rf-btn-danger" id="rf-reset-btn">&#128465; Reset Default</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 (function(){
-  // Inject link setelah semua tab nav selesai render
-  // Cari anchor terakhir di nav, tambahkan link upload logo di sampingnya
-  function inject(){
-    if(document.getElementById('radfast-logo-nav')) return;
-    var link = document.createElement('a');
-    link.id = 'radfast-logo-nav';
-    link.href = '/__admin/logo';
-    link.title = 'Upload Logo';
-    link.textContent = '\\uD83D\\uDDBC\\uFE0F Logo';
+  var ADMIN = '/__admin/logo';
 
-    // Coba tempatkan di samping "Log out"
+  /* ── Inject nav button ── */
+  function injectNav(){
+    if(document.getElementById('rf-nav-btn')) return;
+    var btn = document.createElement('button');
+    btn.id = 'rf-nav-btn';
+    btn.title = 'Upload Logo';
+    btn.innerHTML = '&#128444; Logo';
+    btn.onclick = openModal;
+
     var logout = Array.from(document.querySelectorAll('a')).find(function(a){
       return a.textContent.trim().toLowerCase()==='log out';
     });
     if(logout && logout.parentNode){
-      logout.parentNode.insertBefore(link, logout);
-      logout.parentNode.insertBefore(document.createTextNode(' | '), logout);
+      var sep = document.createTextNode(' | ');
+      logout.parentNode.insertBefore(sep, logout);
+      logout.parentNode.insertBefore(btn, sep);
       return;
     }
-
-    // Fallback: tambah ke <nav> pertama
     var nav = document.querySelector('nav');
-    if(nav){ nav.appendChild(link); return; }
+    if(nav){ nav.appendChild(btn); return; }
+    btn.style.cssText='position:fixed;top:8px;right:90px;z-index:9999;'+
+      'background:#5a8a2a;color:#fff;padding:3px 12px;border-radius:12px;font-size:12px;';
+    document.body && document.body.appendChild(btn);
+  }
 
-    // Last resort: fixed di pojok kanan atas, tapi kecil & tidak mengganggu
-    link.style.cssText = 'position:fixed;top:6px;right:80px;z-index:9999;'+
-      'background:rgba(0,0,0,.45);color:#fff;padding:3px 10px;'+
-      'border-radius:12px;font-size:12px;text-decoration:none;';
-    document.body && document.body.appendChild(link);
+  /* ── Modal open/close ── */
+  function openModal(){
+    document.getElementById('rf-modal-backdrop').classList.add('open');
+    loadPreview();
+    clearMsg();
   }
+  function closeModal(){
+    document.getElementById('rf-modal-backdrop').classList.remove('open');
+    document.getElementById('rf-file-input').value='';
+    document.getElementById('rf-file-name').textContent='SVG / PNG / JPG / GIF / WebP \\u2014 maks 2 MB';
+    clearMsg();
+  }
+
+  /* ── Preview ── */
+  function loadPreview(){
+    var wrap = document.getElementById('rf-preview-wrap');
+    var img = document.createElement('img');
+    img.src = ADMIN+'/preview?t='+Date.now();
+    img.alt = 'Logo aktif';
+    img.onerror = function(){ wrap.innerHTML='<span>Logo default GenieACS</span>'; };
+    img.onload  = function(){ wrap.innerHTML=''; wrap.appendChild(img); };
+  }
+
+  /* ── Message ── */
+  function showMsg(type, text){
+    var el = document.getElementById('rf-msg');
+    el.className = type; el.textContent = text;
+  }
+  function clearMsg(){
+    var el = document.getElementById('rf-msg');
+    el.className=''; el.textContent=''; el.style.display='none';
+  }
+
+  /* ── Upload via fetch ── */
+  function doUpload(){
+    var fileInput = document.getElementById('rf-file-input');
+    var file = fileInput.files[0];
+    if(!file){ showMsg('er','Pilih file terlebih dahulu.'); return; }
+    if(file.size > 2*1024*1024){ showMsg('er','File terlalu besar (maks 2 MB).'); return; }
+
+    var btn = document.getElementById('rf-upload-btn');
+    btn.disabled = true; btn.textContent = 'Mengupload...';
+
+    var fd = new FormData();
+    fd.append('logo', file);
+    fd.append('token', '__genie_session__');
+
+    fetch(ADMIN+'/upload', { method:'POST', body:fd, credentials:'include' })
+      .then(function(r){ return r.text(); })
+      .then(function(html){
+        var ok = html.indexOf('berhasil') >= 0 || html.indexOf('Logo berhasil') >= 0;
+        if(ok){
+          showMsg('ok','\\u2705 Logo berhasil diupload! Refresh halaman untuk melihat perubahan.');
+          loadPreview();
+          // Auto refresh logo di halaman utama tanpa full reload
+          var logoImgs = document.querySelectorAll('img[src*="logo"]');
+          logoImgs.forEach(function(img){
+            var s=img.src; img.src=''; img.src=s+'?t='+Date.now();
+          });
+        } else {
+          showMsg('er','\\u274C Gagal upload. Coba lagi.');
+        }
+      })
+      .catch(function(){ showMsg('er','\\u274C Error koneksi.'); })
+      .finally(function(){
+        btn.disabled=false; btn.innerHTML='&#8679; Upload Logo';
+      });
+  }
+
+  /* ── Reset via fetch ── */
+  function doReset(){
+    if(!confirm('Reset logo ke default GenieACS?')) return;
+    fetch(ADMIN+'/reset', {
+      method:'POST', credentials:'include',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:'token=__genie_session__'
+    })
+    .then(function(r){ return r.text(); })
+    .then(function(html){
+      var ok = html.indexOf('direset') >= 0 || html.indexOf('default') >= 0;
+      showMsg(ok?'ok':'er', ok?'\\u2705 Logo direset ke default.':'\\u274C Gagal reset.');
+      if(ok) loadPreview();
+    })
+    .catch(function(){ showMsg('er','\\u274C Error koneksi.'); });
+  }
+
+  /* ── Event listeners ── */
+  function setup(){
+    document.getElementById('rf-modal-close').onclick = closeModal;
+    document.getElementById('rf-modal-backdrop').onclick = function(e){
+      if(e.target===this) closeModal();
+    };
+    document.getElementById('rf-upload-btn').onclick = doUpload;
+    document.getElementById('rf-reset-btn').onclick  = doReset;
+
+    // Drag & drop
+    var area = document.getElementById('rf-file-area');
+    area.addEventListener('dragover', function(e){ e.preventDefault(); area.classList.add('drag'); });
+    area.addEventListener('dragleave', function(){ area.classList.remove('drag'); });
+    area.addEventListener('drop', function(e){
+      e.preventDefault(); area.classList.remove('drag');
+      var f = e.dataTransfer.files[0];
+      if(f){ document.getElementById('rf-file-input').files;
+        // Assign via DataTransfer
+        var dt = new DataTransfer(); dt.items.add(f);
+        document.getElementById('rf-file-input').files = dt.files;
+        document.getElementById('rf-file-name').textContent = f.name+' ('+Math.round(f.size/1024)+' KB)';
+      }
+    });
+
+    // File name display
+    document.getElementById('rf-file-input').onchange = function(){
+      var f = this.files[0];
+      document.getElementById('rf-file-name').textContent = f
+        ? f.name+' ('+Math.round(f.size/1024)+' KB)'
+        : 'SVG / PNG / JPG / GIF / WebP \\u2014 maks 2 MB';
+    };
+
+    // Keyboard ESC close
+    document.addEventListener('keydown', function(e){
+      if(e.key==='Escape') closeModal();
+    });
+  }
+
+  /* ── Init ── */
+  function init(){
+    setup();
+    injectNav();
+  }
+
   if(document.readyState==='loading'){
-    document.addEventListener('DOMContentLoaded', inject);
-  } else {
-    inject();
-  }
-  // GenieACS SPA: observe URL change
+    document.addEventListener('DOMContentLoaded', init);
+  } else { init(); }
+
+  // SPA navigation
   var last = location.href;
   setInterval(function(){
-    if(location.href!==last){ last=location.href; setTimeout(inject,300); }
+    if(location.href!==last){ last=location.href; setTimeout(injectNav,400); }
   }, 500);
+
+  // Handle direct URL /__admin/logo → redirect ke dashboard + buka modal
+  if(location.pathname==='/__admin/logo'){
+    history.replaceState(null,'','/');
+    setTimeout(openModal, 600);
+  }
 })();
 </script>`;
 
 function injectNavLink(html) {
-    // Inject script ke sebelum </body> — script akan inject link ke DOM
     if (html.includes('</body>')) {
         return html.replace('</body>', NAV_INJECT + '</body>');
     }
