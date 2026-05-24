@@ -21,10 +21,11 @@ const fs     = require('fs');
 const path   = require('path');
 const crypto = require('crypto');
 
-const PUBLIC_PORT  = parseInt(process.env.RADFAST_PROXY_PORT   || 3001);
-const GENIE_PORT   = parseInt(process.env.RADFAST_UI_INTERNAL  || 13001);
-const LOGO_BASE    = process.env.RADFAST_LOGO_FILE || '/tmp/radfast-logo';
-const ADMIN_TOKEN  = process.env.RADFAST_ADMIN_TOKEN || '';
+const PUBLIC_PORT  = parseInt(process.env.RADFAST_PROXY_PORT       || 3001);
+const GENIE_PORT   = parseInt(process.env.RADFAST_UI_INTERNAL      || 13001);
+const LOGO_BASE    = process.env.RADFAST_LOGO_FILE                 || '/tmp/radfast-logo';
+const ADMIN_TOKEN  = process.env.RADFAST_ADMIN_TOKEN               || '';
+const JWT_SECRET   = process.env.GENIEACS_UI_JWT_SECRET            || '';
 const MAX_SIZE     = 2 * 1024 * 1024; // 2 MB hard limit
 
 // ════════════════════════════════════════════════════════════
@@ -109,12 +110,52 @@ function safeTokenCheck(input) {
     if (!ADMIN_TOKEN || !input) return false;
     const a = Buffer.from(input.trim());
     const b = Buffer.from(ADMIN_TOKEN.trim());
-    // Pad ke panjang sama agar timingSafeEqual tidak throw
     const len  = Math.max(a.length, b.length);
     const aPad = Buffer.concat([a, Buffer.alloc(len - a.length)]);
     const bPad = Buffer.concat([b, Buffer.alloc(len - b.length)]);
-    // Bandingkan isi DAN panjang — keduanya harus sama
     return crypto.timingSafeEqual(aPad, bPad) && a.length === b.length;
+}
+
+// ════════════════════════════════════════════════════════════
+//  CEK SESSION GENIEACS (JWT HS256)
+//  Kalau user sudah login ke GenieACS → langsung boleh upload
+//  tanpa perlu input token manual
+// ════════════════════════════════════════════════════════════
+function verifyGenieJWT(token) {
+    if (!token || !JWT_SECRET) return false;
+    try {
+        const parts = token.split('.');
+        if (parts.length !== 3) return false;
+        // Decode payload
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf-8'));
+        // Cek expiry
+        if (payload.exp && Date.now() / 1000 > payload.exp) return false;
+        // Verifikasi signature HS256
+        const expected = crypto.createHmac('sha256', JWT_SECRET)
+            .update(parts[0] + '.' + parts[1])
+            .digest('base64url');
+        const a = Buffer.from(expected);
+        const b = Buffer.from(parts[2]);
+        if (a.length !== b.length) return false;
+        return crypto.timingSafeEqual(a, b);
+    } catch(_) { return false; }
+}
+
+function isGenieSession(req) {
+    // Cek Authorization: Bearer <token>
+    const auth = req.headers['authorization'] || '';
+    const bear = auth.match(/^Bearer\s+(\S+)/i);
+    if (bear && verifyGenieJWT(bear[1])) return true;
+
+    // Cek semua cookie — coba tiap nilai sebagai JWT
+    const cookieStr = req.headers['cookie'] || '';
+    for (const part of cookieStr.split(';')) {
+        const val = part.trim().split('=').slice(1).join('=');
+        try {
+            if (val && verifyGenieJWT(decodeURIComponent(val))) return true;
+        } catch(_) {}
+    }
+    return false;
 }
 
 // ════════════════════════════════════════════════════════════
@@ -247,9 +288,29 @@ function deleteAllLogo() {
 // ════════════════════════════════════════════════════════════
 //  UPLOAD PAGE HTML
 // ════════════════════════════════════════════════════════════
-function uploadPage(msg = '') {
+function uploadPage(msg = '', authed = false) {
     const custom = findCustomLogo();
     const ts = Date.now();
+
+    // Kalau sudah login GenieACS: tidak perlu isi token manual
+    const tokenField = authed
+        ? `<input type="hidden" name="token" value="__genie_session__">`
+        : `<label>🔑 Token Admin</label>
+           <input type="password" name="token" placeholder="Masukkan token admin" required autocomplete="new-password">`;
+
+    const resetTokenField = authed
+        ? `<input type="hidden" name="token" value="__genie_session__">`
+        : `<label>🔑 Token Admin</label>
+           <input type="password" name="token" placeholder="Token admin" required autocomplete="new-password">`;
+
+    const authBadge = authed
+        ? `<div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:6px;padding:8px 12px;font-size:13px;color:#2e7d32;margin-bottom:14px">
+             ✅ Login terdeteksi — langsung upload tanpa token
+           </div>`
+        : `<div style="background:#fff3e0;border:1px solid #ffcc80;border-radius:6px;padding:8px 12px;font-size:13px;color:#e65100;margin-bottom:14px">
+             ⚠️ Akses langsung — masukkan token admin
+           </div>`;
+
     return `<!DOCTYPE html>
 <html lang="id">
 <head>
@@ -261,11 +322,11 @@ function uploadPage(msg = '') {
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:Arial,sans-serif;background:#f0f2f5;padding:30px 16px}
   .card{max-width:460px;margin:0 auto;background:#fff;border-radius:10px;padding:32px;box-shadow:0 2px 12px rgba(0,0,0,.1)}
-  h2{color:#333;font-size:20px;margin-bottom:20px}
+  h2{color:#333;font-size:20px;margin-bottom:14px}
   label{display:block;font-size:13px;font-weight:bold;color:#555;margin:14px 0 4px}
   input[type=password]{width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;outline:none}
   input[type=password]:focus{border-color:#3498db}
-  input[type=file]{width:100%;padding:6px 0;font-size:14px}
+  input[type=file]{width:100%;padding:6px 0;font-size:14px;margin-top:6px}
   .btn{display:inline-block;padding:10px 22px;border:none;border-radius:6px;font-size:14px;cursor:pointer;margin-top:14px;font-weight:bold}
   .g{background:#27ae60;color:#fff}.g:hover{background:#1e8449}
   .r{background:#e74c3c;color:#fff;font-size:13px;padding:8px 16px;margin-top:10px}.r:hover{background:#c0392b}
@@ -284,6 +345,7 @@ function uploadPage(msg = '') {
 <body>
 <div class="card">
   <h2>🖼 Upload Logo</h2>
+  ${authBadge}
   ${msg}
   ${custom ? `<div class="prev">
     <img src="/__admin/logo/preview?t=${ts}" alt="Logo saat ini">
@@ -291,25 +353,20 @@ function uploadPage(msg = '') {
   </div>` : `<p style="color:#aaa;font-size:13px;margin-bottom:14px">Menampilkan logo default GenieACS.</p>`}
 
   <form method="POST" action="/__admin/logo/upload" enctype="multipart/form-data" autocomplete="off">
-    <label>🔑 Token Admin</label>
-    <input type="password" name="token" placeholder="Masukkan token admin" required autocomplete="new-password">
+    ${tokenField}
     <label>📁 File Logo</label>
     <small style="color:#888;font-size:12px">SVG / PNG / JPG · maks 2 MB</small>
-    <input type="file" name="logo" accept=".svg,.png,.jpg,.jpeg" required style="margin-top:6px">
+    <input type="file" name="logo" accept=".svg,.png,.jpg,.jpeg" required>
     <button type="submit" class="btn g">⬆ Upload Logo</button>
   </form>
 
   ${custom ? `<hr>
   <form method="POST" action="/__admin/logo/reset" autocomplete="off">
-    <label>🔑 Token Admin (untuk reset)</label>
-    <input type="password" name="token" placeholder="Token admin" required autocomplete="new-password">
+    ${resetTokenField}
     <button type="submit" class="btn r">🗑 Reset ke Logo Default</button>
   </form>` : ''}
 
-  <p class="note">
-    ⚡ Logo aktif langsung tanpa restart.<br>
-    🔒 5 percobaan gagal = IP diblokir 30 menit.
-  </p>
+  <p class="note">⚡ Logo aktif langsung tanpa restart.</p>
   <a class="back" href="/">← Kembali ke Dashboard</a>
 </div>
 </body>
@@ -445,7 +502,15 @@ const server = http.createServer((req, res) => {
 
     // ── Admin: tampilkan form ──────────────────────────────
     if (url === '/__admin/logo') {
-        sendSecure(res, 200, 'text/html; charset=utf-8', uploadPage());
+        const authed = isGenieSession(req);
+        if (!authed && !ADMIN_TOKEN) {
+            // Tidak ada session & tidak ada token → minta login dulu
+            sendSecure(res, 302, 'text/html; charset=utf-8', '');
+            res.setHeader('Location', '/');
+            res.end();
+            return;
+        }
+        sendSecure(res, 200, 'text/html; charset=utf-8', uploadPage('', authed));
         return;
     }
 
@@ -509,14 +574,20 @@ const server = http.createServer((req, res) => {
                 const boundary = bm[1].replace(/^["']|["']$/g, '');
                 const parts    = parseMultipart(body, boundary);
 
-                // ── Cek token (timing-safe) ────────────────
-                const tok = (parts.token && parts.token.value) ? parts.token.value : '';
-                if (!safeTokenCheck(tok)) {
-                    recordFail(ip, 'Token salah');
+                // ── Cek auth: session GenieACS ATAU token manual ──
+                const tok       = (parts.token && parts.token.value) ? parts.token.value : '';
+                const bySession = tok === '__genie_session__' && isGenieSession(req);
+                const byToken   = !bySession && safeTokenCheck(tok);
+
+                if (!bySession && !byToken) {
+                    recordFail(ip, 'Token salah / session tidak valid');
+                    const authed = isGenieSession(req);
                     sendSecure(res, 403, 'text/html; charset=utf-8',
-                        uploadPage('<div class="msg er">❌ Token salah!</div>'));
+                        uploadPage('<div class="msg er">❌ Akses ditolak. Login ke GenieACS dulu atau masukkan token yang benar.</div>', authed));
                     return;
                 }
+                if (bySession) auditLog('SESSION', ip, 'Upload via GenieACS session');
+                if (byToken)   auditLog('TOKEN',   ip, 'Upload via admin token');
 
                 // ── Cek file ada ───────────────────────────
                 const file = parts.logo;
@@ -568,13 +639,12 @@ const server = http.createServer((req, res) => {
                 recordSuccess(ip);
 
                 sendSecure(res, 200, 'text/html; charset=utf-8',
-                    uploadPage('<div class="msg ok">✅ Logo berhasil diupload!</div>'));
+                    uploadPage('<div class="msg ok">✅ Logo berhasil diupload!</div>', bySession || isGenieSession(req)));
 
             } catch(e) {
-                // Jangan expose detail error ke client
                 console.error(`[logo-proxy] Upload error dari ${ip}:`, e.message);
                 sendSecure(res, 500, 'text/html; charset=utf-8',
-                    uploadPage('<div class="msg er">❌ Terjadi kesalahan server. Coba lagi.</div>'));
+                    uploadPage('<div class="msg er">❌ Terjadi kesalahan server. Coba lagi.</div>', isGenieSession(req)));
             }
         });
 
@@ -594,21 +664,24 @@ const server = http.createServer((req, res) => {
         const chunks = [];
         req.on('data', c => { if (Buffer.concat(chunks).length < 4096) chunks.push(c); });
         req.on('end', () => {
-            const body = Buffer.concat(chunks).toString('utf-8', 0, 4096);
-            const tokM = body.match(/(?:^|&)token=([^&]*)/);
-            const tok  = tokM ? decodeURIComponent(tokM[1]) : '';
+            const body      = Buffer.concat(chunks).toString('utf-8', 0, 4096);
+            const tokM      = body.match(/(?:^|&)token=([^&]*)/);
+            const tok       = tokM ? decodeURIComponent(tokM[1]) : '';
+            const bySession = tok === '__genie_session__' && isGenieSession(req);
+            const byToken   = !bySession && safeTokenCheck(tok);
+            const authed    = isGenieSession(req);
 
-            if (!safeTokenCheck(tok)) {
+            if (!bySession && !byToken) {
                 recordFail(ip, 'Token salah saat reset');
                 sendSecure(res, 403, 'text/html; charset=utf-8',
-                    uploadPage('<div class="msg er">❌ Token salah!</div>'));
+                    uploadPage('<div class="msg er">❌ Akses ditolak.</div>', authed));
                 return;
             }
 
             deleteAllLogo();
             auditLog('RESET', ip, 'Logo direset ke default');
             sendSecure(res, 200, 'text/html; charset=utf-8',
-                uploadPage('<div class="msg ok">✅ Logo direset ke logo default.</div>'));
+                uploadPage('<div class="msg ok">✅ Logo direset ke logo default.</div>', authed));
         });
         req.on('error', () => {});
         return;
