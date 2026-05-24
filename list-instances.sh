@@ -37,6 +37,10 @@ while IFS= read -r line; do
     IP=$(echo "$line"   | grep -oP 'IP=\K\S+' || echo "?")
     DATE=$(echo "$line" | grep -oP 'DATE=\K\S+' || echo "?")
 
+    # Baca token dari .env instance
+    ATOKEN=$(grep -oP 'RADFAST_ADMIN_TOKEN=\K\S+' \
+        "$INSTANCES_DIR/$NAME/.env" 2>/dev/null || echo "(tidak ditemukan)")
+
     echo ""
     echo -e "  ${BOLD}[$COUNT] ${CYAN}$NAME${NC}  ${DIM}(dibuat: $DATE)${NC}"
     echo -e "  ├─ UI   Dashboard Web      : ${GREEN}http://$IP:$UI${NC}"
@@ -44,8 +48,8 @@ while IFS= read -r line; do
     echo -e "  ├─ NBI  REST API           : $IP:$NBI"
     echo -e "  ├─ FS   File Server        : $IP:$FS"
     echo -e "  ├─ Database                : $DB"
-
-    echo -e "  ├─ 🖼  Upload Logo             : ${CYAN}http://$IP:$UI/__admin/logo${NC}"
+    echo -e "  ├─ Upload Logo             : ${CYAN}http://$IP:$UI/__admin/logo${NC}"
+    echo -e "  ├─ Token Upload Logo       : ${YELLOW}$ATOKEN${NC}"
 
     # Cek status services
     STATUS_LINE=""
