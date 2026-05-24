@@ -590,13 +590,16 @@ const NAV_INJECT = `
 #rf-msg.ok{background:#dff0d8;color:#2d6a0f;border:1px solid #b8dca0;display:block}
 #rf-msg.er{background:#f2dede;color:#8b1a1a;border:1px solid #e0b0b0;display:block}
 
-/* Nav link */
+/* Nav link — sama persis style dengan tab Admin GenieACS */
 #rf-nav-btn{
+  display:inline-block;
   color:inherit;text-decoration:none;
-  padding:0 10px;font-size:inherit;
+  padding:0;margin:0;
+  font-size:inherit;font-family:inherit;font-weight:inherit;
   cursor:pointer;background:none;border:none;
+  line-height:inherit;vertical-align:middle;
 }
-#rf-nav-btn:hover{text-decoration:underline}
+#rf-nav-btn:hover{text-decoration:underline;color:inherit}
 </style>
 
 <!-- Modal HTML -->
@@ -634,9 +637,26 @@ const NAV_INJECT = `
     var btn = document.createElement('button');
     btn.id = 'rf-nav-btn';
     btn.title = 'Upload Logo';
-    btn.innerHTML = '&#128444; Logo';
+    btn.textContent = 'Logo';
     btn.onclick = openModal;
 
+    // Cari tab Admin atau tab lain di nav GenieACS
+    // GenieACS pakai <a> tag untuk nav tabs
+    var adminLink = Array.from(document.querySelectorAll('a,button')).find(function(el){
+      var t = el.textContent.trim();
+      return t === 'Admin' || t === 'Faults' || t === 'Devices';
+    });
+    if(adminLink && adminLink.parentNode){
+      // Clone style dari elemen tab yang ada
+      var clone = adminLink.cloneNode(false);
+      clone.id = 'rf-nav-btn';
+      clone.textContent = 'Logo';
+      clone.removeAttribute('href');
+      clone.onclick = openModal;
+      adminLink.parentNode.insertBefore(clone, adminLink.nextSibling);
+      return;
+    }
+    // Fallback: cari "Log out" link
     var logout = Array.from(document.querySelectorAll('a')).find(function(a){
       return a.textContent.trim().toLowerCase()==='log out';
     });
@@ -648,8 +668,6 @@ const NAV_INJECT = `
     }
     var nav = document.querySelector('nav');
     if(nav){ nav.appendChild(btn); return; }
-    btn.style.cssText='position:fixed;top:8px;right:90px;z-index:9999;'+
-      'background:#5a8a2a;color:#fff;padding:3px 12px;border-radius:12px;font-size:12px;';
     document.body && document.body.appendChild(btn);
   }
 
@@ -781,17 +799,25 @@ const NAV_INJECT = `
   function init(){
     setup();
     injectNav();
+    // MutationObserver: inject segera saat DOM berubah (SPA render)
+    var obs = new MutationObserver(function(){
+      if(!document.getElementById('rf-nav-btn')) injectNav();
+    });
+    obs.observe(document.body || document.documentElement, {childList:true, subtree:true});
   }
 
   if(document.readyState==='loading'){
     document.addEventListener('DOMContentLoaded', init);
   } else { init(); }
 
-  // SPA navigation
+  // SPA navigation URL change (backup)
   var last = location.href;
   setInterval(function(){
-    if(location.href!==last){ last=location.href; setTimeout(injectNav,400); }
-  }, 500);
+    if(location.href!==last){
+      last=location.href;
+      setTimeout(function(){ if(!document.getElementById('rf-nav-btn')) injectNav(); }, 100);
+    }
+  }, 300);
 
   // Handle direct URL /__admin/logo → redirect ke dashboard + buka modal
   if(location.pathname==='/__admin/logo'){
