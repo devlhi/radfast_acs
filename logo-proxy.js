@@ -518,307 +518,241 @@ function parseMultipart(body, boundary) {
 //  Inject link "🖼 Logo" sejajar dengan tab nav yang ada.
 //  Tidak menggunakan position:fixed agar tidak nutup konten.
 // ════════════════════════════════════════════════════════════
-const NAV_INJECT = `
-<style>
-/* ── Modal backdrop ── */
-#rf-modal-backdrop{
-  display:none;position:fixed;inset:0;z-index:99998;
-  background:rgba(0,0,0,.45);
-  align-items:center;justify-content:center;
-}
-#rf-modal-backdrop.open{display:flex}
-
-/* ── Modal box — ikuti style GenieACS (beige header) ── */
-#rf-modal{
-  background:#fff;border-radius:4px;
-  box-shadow:0 4px 24px rgba(0,0,0,.25);
-  width:400px;max-width:94vw;
-  font-family:Arial,sans-serif;font-size:14px;
-  overflow:hidden;
-}
-#rf-modal-head{
-  background:#d4c89a;padding:10px 16px;
-  display:flex;align-items:center;justify-content:space-between;
-  border-bottom:1px solid #b8ae82;
-}
-#rf-modal-head h3{margin:0;font-size:15px;color:#333;font-weight:bold}
-#rf-modal-close{
-  background:none;border:none;font-size:20px;cursor:pointer;
-  color:#555;line-height:1;padding:0 4px;
-}
-#rf-modal-close:hover{color:#000}
-#rf-modal-body{padding:18px}
-
-/* Preview logo */
-#rf-preview-wrap{
-  text-align:center;border:1px solid #e0e0e0;
-  border-radius:4px;padding:10px;margin-bottom:14px;
-  background:#fafafa;min-height:60px;
-  display:flex;align-items:center;justify-content:center;
-}
-#rf-preview-wrap img{max-height:60px;max-width:100%;object-fit:contain}
-#rf-preview-wrap span{color:#aaa;font-size:13px}
-
-/* File input area */
-#rf-file-area{
-  border:2px dashed #c8c0a0;border-radius:4px;
-  padding:12px;text-align:center;cursor:pointer;
-  transition:border-color .2s;margin-bottom:12px;
-  background:#fffdf5;
-}
-#rf-file-area:hover,#rf-file-area.drag{border-color:#8a7d50}
-#rf-file-area input{display:none}
-#rf-file-area label{cursor:pointer;color:#555;font-size:13px}
-#rf-file-name{font-size:12px;color:#888;margin-top:4px}
-
-/* Buttons */
-#rf-modal-body .rf-btn{
-  display:inline-block;padding:7px 18px;border:none;
-  border-radius:3px;cursor:pointer;font-size:13px;
-  font-weight:bold;transition:opacity .15s;
-}
-#rf-modal-body .rf-btn:hover{opacity:.85}
-.rf-btn-primary{background:#5a8a2a;color:#fff}
-.rf-btn-danger{background:#c0392b;color:#fff;font-size:12px;padding:5px 12px}
-.rf-btn-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-
-/* Status message */
-#rf-msg{
-  padding:7px 10px;border-radius:3px;margin-bottom:10px;
-  font-size:13px;display:none;
-}
-#rf-msg.ok{background:#dff0d8;color:#2d6a0f;border:1px solid #b8dca0;display:block}
-#rf-msg.er{background:#f2dede;color:#8b1a1a;border:1px solid #e0b0b0;display:block}
-
-/* Nav link — sama persis style dengan tab Admin GenieACS */
-#rf-nav-btn{
-  display:inline-block;
-  color:inherit;text-decoration:none;
-  padding:0;margin:0;
-  font-size:inherit;font-family:inherit;font-weight:inherit;
-  cursor:pointer;background:none;border:none;
-  line-height:inherit;vertical-align:middle;
-}
-#rf-nav-btn:hover{text-decoration:underline;color:inherit}
-</style>
-
-<!-- Modal HTML -->
-<div id="rf-modal-backdrop">
-  <div id="rf-modal">
-    <div id="rf-modal-head">
-      <h3>&#128444; Upload Logo</h3>
-      <button id="rf-modal-close" title="Tutup">&times;</button>
-    </div>
-    <div id="rf-modal-body">
-      <div id="rf-msg"></div>
-      <div id="rf-preview-wrap">
-        <span>Memuat logo...</span>
-      </div>
-      <div id="rf-file-area">
-        <input type="file" id="rf-file-input" accept=".svg,.png,.jpg,.jpeg,.gif,.webp,.ico,.bmp">
-        <label for="rf-file-input">&#128194; Klik atau drag file ke sini</label>
-        <div id="rf-file-name">SVG / PNG / JPG / GIF / WebP &mdash; maks 2 MB</div>
-      </div>
-      <div class="rf-btn-row">
-        <button class="rf-btn rf-btn-primary" id="rf-upload-btn">&#8679; Upload Logo</button>
-        <button class="rf-btn rf-btn-danger" id="rf-reset-btn">&#128465; Reset Default</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<script>
+const NAV_INJECT = `<script>
 (function(){
+  'use strict';
   var ADMIN = '/__admin/logo';
+  var _modal = null; // simpan referensi modal agar tidak terhapus Mithril
+
+  /* ════════════════════════════════════════
+     Buat modal sepenuhnya via JS
+     (tidak pakai HTML statis agar tidak
+      dihapus oleh Mithril virtual-DOM)
+  ════════════════════════════════════════ */
+  function buildModal(){
+    if(_modal && document.body.contains(_modal)) return _modal;
+
+    // Inject CSS sekali saja
+    if(!document.getElementById('rf-style')){
+      var s = document.createElement('style');
+      s.id = 'rf-style';
+      s.textContent = [
+        '#rf-bd{display:none;position:fixed;top:0;left:0;right:0;bottom:0;',
+        'z-index:2147483647;background:rgba(0,0,0,.5);',
+        'align-items:center;justify-content:center;}',
+        '#rf-bd.open{display:flex!important;}',
+        '#rf-box{background:#fff;border-radius:4px;width:420px;max-width:95vw;',
+        'box-shadow:0 6px 32px rgba(0,0,0,.35);font-family:Arial,sans-serif;',
+        'font-size:14px;overflow:hidden;}',
+        '#rf-head{background:#d4c89a;padding:10px 16px;display:flex;',
+        'align-items:center;justify-content:space-between;',
+        'border-bottom:1px solid #b8ae82;}',
+        '#rf-head h3{margin:0;font-size:15px;color:#333;}',
+        '#rf-xbtn{background:none;border:none;font-size:22px;cursor:pointer;',
+        'color:#555;line-height:1;padding:0 2px;}',
+        '#rf-body{padding:16px;}',
+        '#rf-prev{text-align:center;border:1px solid #ddd;border-radius:4px;',
+        'padding:10px;margin-bottom:12px;background:#fafafa;min-height:56px;',
+        'display:flex;align-items:center;justify-content:center;}',
+        '#rf-prev img{max-height:56px;max-width:100%;object-fit:contain;}',
+        '#rf-prev span{color:#aaa;font-size:13px;}',
+        '#rf-area{border:2px dashed #c8c0a0;border-radius:4px;padding:12px;',
+        'text-align:center;cursor:pointer;margin-bottom:10px;background:#fffdf5;}',
+        '#rf-area:hover{border-color:#8a7d50;}',
+        '#rf-area label{cursor:pointer;color:#555;font-size:13px;}',
+        '#rf-fname{font-size:12px;color:#888;margin-top:4px;}',
+        '#rf-area input[type=file]{display:none;}',
+        '.rf-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}',
+        '.rf-btn{padding:7px 18px;border:none;border-radius:3px;cursor:pointer;',
+        'font-size:13px;font-weight:bold;}',
+        '.rf-ok{background:#5a8a2a;color:#fff;}',
+        '.rf-rm{background:#c0392b;color:#fff;font-size:12px;padding:5px 12px;}',
+        '#rf-msg{padding:7px 10px;border-radius:3px;margin-bottom:10px;',
+        'font-size:13px;display:none;}',
+        '#rf-msg.ok{background:#dff0d8;color:#2d6a0f;border:1px solid #b8dca0;display:block;}',
+        '#rf-msg.er{background:#f2dede;color:#8b1a1a;border:1px solid #e0b0b0;display:block;}'
+      ].join('');
+      document.head.appendChild(s);
+    }
+
+    // Backdrop
+    var bd = document.createElement('div'); bd.id='rf-bd';
+    bd.addEventListener('click', function(e){ if(e.target===bd) closeModal(); });
+
+    // Box
+    var box = document.createElement('div'); box.id='rf-box';
+
+    // Head
+    var head = document.createElement('div'); head.id='rf-head';
+    var h3 = document.createElement('h3'); h3.textContent='Upload Logo';
+    var xbtn = document.createElement('button'); xbtn.id='rf-xbtn';
+    xbtn.innerHTML='&times;'; xbtn.title='Tutup';
+    xbtn.addEventListener('click', closeModal);
+    head.appendChild(h3); head.appendChild(xbtn);
+
+    // Body
+    var body = document.createElement('div'); body.id='rf-body';
+
+    // Message
+    var msg = document.createElement('div'); msg.id='rf-msg';
+
+    // Preview
+    var prev = document.createElement('div'); prev.id='rf-prev';
+    prev.innerHTML='<span>Memuat...</span>';
+
+    // File area
+    var area = document.createElement('div'); area.id='rf-area';
+    var lbl  = document.createElement('label'); lbl.textContent='Klik atau drag file ke sini';
+    var inp  = document.createElement('input'); inp.type='file'; inp.id='rf-finput';
+    inp.accept='.svg,.png,.jpg,.jpeg,.gif,.webp,.ico,.bmp';
+    lbl.setAttribute('for','rf-finput');
+    var fname = document.createElement('div'); fname.id='rf-fname';
+    fname.textContent='SVG / PNG / JPG / GIF / WebP — maks 2 MB';
+    inp.addEventListener('change', function(){
+      var f=inp.files[0];
+      fname.textContent = f ? f.name+' ('+Math.round(f.size/1024)+' KB)' : 'SVG / PNG / JPG / GIF / WebP — maks 2 MB';
+    });
+    // Drag & drop
+    area.addEventListener('dragover',function(e){e.preventDefault();area.style.borderColor='#8a7d50';});
+    area.addEventListener('dragleave',function(){area.style.borderColor='';});
+    area.addEventListener('drop',function(e){
+      e.preventDefault(); area.style.borderColor='';
+      var f=e.dataTransfer&&e.dataTransfer.files[0];
+      if(f){ try{ var dt=new DataTransfer(); dt.items.add(f); inp.files=dt.files;
+        fname.textContent=f.name+' ('+Math.round(f.size/1024)+' KB)'; }catch(ex){} }
+    });
+    area.appendChild(inp); area.appendChild(lbl); area.appendChild(fname);
+
+    // Buttons row
+    var row = document.createElement('div'); row.className='rf-row';
+    var upBtn = document.createElement('button'); upBtn.className='rf-btn rf-ok'; upBtn.id='rf-ubtn';
+    upBtn.textContent='Upload Logo';
+    var rmBtn = document.createElement('button'); rmBtn.className='rf-btn rf-rm'; rmBtn.id='rf-rbtn';
+    rmBtn.textContent='Reset Default';
+
+    upBtn.addEventListener('click', function(){
+      var f=inp.files[0];
+      if(!f){setMsg('er','Pilih file terlebih dahulu.');return;}
+      if(f.size>2*1024*1024){setMsg('er','File terlalu besar (maks 2 MB).');return;}
+      upBtn.disabled=true; upBtn.textContent='Mengupload...';
+      var fd=new FormData(); fd.append('logo',f); fd.append('token','__genie_session__');
+      fetch(ADMIN+'/upload',{method:'POST',body:fd,credentials:'include'})
+        .then(function(r){return r.text();})
+        .then(function(t){
+          var ok=t.indexOf('berhasil')>=0||t.indexOf('Logo berhasil')>=0;
+          setMsg(ok?'ok':'er', ok?'✅ Logo berhasil diupload!':'❌ Gagal upload, coba lagi.');
+          if(ok){ loadPrev(prev); refreshLogoImgs(); }
+        })
+        .catch(function(){setMsg('er','❌ Error koneksi.');})
+        .finally(function(){upBtn.disabled=false;upBtn.textContent='Upload Logo';});
+    });
+
+    rmBtn.addEventListener('click', function(){
+      if(!confirm('Reset logo ke default GenieACS?')) return;
+      fetch(ADMIN+'/reset',{method:'POST',credentials:'include',
+        headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body:'token=__genie_session__'})
+        .then(function(r){return r.text();})
+        .then(function(t){
+          var ok=t.indexOf('direset')>=0||t.indexOf('default')>=0;
+          setMsg(ok?'ok':'er',ok?'✅ Logo direset ke default.':'❌ Gagal reset.');
+          if(ok){ loadPrev(prev); refreshLogoImgs(); }
+        })
+        .catch(function(){setMsg('er','❌ Error koneksi.');});
+    });
+
+    row.appendChild(upBtn); row.appendChild(rmBtn);
+    body.appendChild(msg); body.appendChild(prev); body.appendChild(area); body.appendChild(row);
+    box.appendChild(head); box.appendChild(body);
+    bd.appendChild(box);
+
+    function setMsg(cls,txt){ msg.className=cls; msg.textContent=txt; }
+
+    _modal = bd;
+    return bd;
+  }
+
+  function loadPrev(prev){
+    var img=document.createElement('img');
+    img.src=ADMIN+'/preview?t='+Date.now(); img.alt='Logo';
+    img.onerror=function(){prev.innerHTML='<span>Logo default GenieACS</span>';};
+    img.onload=function(){prev.innerHTML=''; prev.appendChild(img);};
+  }
+
+  function refreshLogoImgs(){
+    document.querySelectorAll('img').forEach(function(img){
+      if(img.src&&img.src.indexOf('logo')>=0){
+        var s=img.src.split('?')[0]; img.src=s+'?t='+Date.now();
+      }
+    });
+  }
+
+  /* ── Open / Close ── */
+  function openModal(){
+    var bd = buildModal();
+    if(!document.body.contains(bd)) document.body.appendChild(bd);
+    bd.classList.add('open');
+    // Load preview
+    var prev = bd.querySelector('#rf-prev');
+    if(prev) loadPrev(prev);
+    // Clear msg
+    var msg = bd.querySelector('#rf-msg');
+    if(msg){ msg.className=''; msg.textContent=''; msg.style.display='none'; }
+  }
+  function closeModal(){
+    if(_modal){ _modal.classList.remove('open'); }
+  }
+
+  /* ESC key */
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeModal(); });
 
   /* ── Inject nav button ── */
   function injectNav(){
     if(document.getElementById('rf-nav-btn')) return;
 
-    // Cari tab "Overview" untuk ambil referensi style
-    var overviewEl = Array.from(document.querySelectorAll('a,li,span,div')).find(function(el){
-      return el.textContent.trim() === 'Overview' && el.offsetParent !== null;
-    });
-    if(!overviewEl) return; // Nav belum render, MutationObserver akan coba lagi
+    var overviewEl = null;
+    var all = document.querySelectorAll('a,li,td,th,span');
+    for(var i=0;i<all.length;i++){
+      var el=all[i];
+      if(el.textContent.trim()==='Overview' && el.offsetParent!==null){
+        overviewEl=el; break;
+      }
+    }
+    if(!overviewEl) return;
 
-    // Buat elemen dengan tag yang sama persis dengan Overview
     var tag = overviewEl.tagName.toLowerCase();
     var btn = document.createElement(tag);
     btn.id = 'rf-nav-btn';
     btn.textContent = 'Logo';
-
-    // Copy semua attribute class dari Overview agar style identik
     if(overviewEl.className) btn.className = overviewEl.className;
-    // Pastikan tidak navigasi ke mana-mana
-    if(tag === 'a'){ btn.href = 'javascript:void(0)'; btn.removeAttribute('href'); }
-    btn.style.cursor = 'pointer';
-
-    // Tambahkan event listener (lebih reliable dari onclick)
-    btn.addEventListener('click', function(e){
-      e.preventDefault();
-      e.stopPropagation();
-      openModal();
+    if(tag==='a'){ btn.setAttribute('href','javascript:void(0)'); }
+    btn.style.cursor='pointer';
+    btn.addEventListener('click',function(e){
+      e.preventDefault(); e.stopPropagation(); openModal();
     });
-
-    // Sisipkan tepat setelah Overview
     overviewEl.parentNode.insertBefore(btn, overviewEl.nextSibling);
   }
 
-  /* ── Modal open/close ── */
-  function openModal(){
-    document.getElementById('rf-modal-backdrop').classList.add('open');
-    loadPreview();
-    clearMsg();
-  }
-  function closeModal(){
-    document.getElementById('rf-modal-backdrop').classList.remove('open');
-    document.getElementById('rf-file-input').value='';
-    document.getElementById('rf-file-name').textContent='SVG / PNG / JPG / GIF / WebP \\u2014 maks 2 MB';
-    clearMsg();
-  }
-
-  /* ── Preview ── */
-  function loadPreview(){
-    var wrap = document.getElementById('rf-preview-wrap');
-    var img = document.createElement('img');
-    img.src = ADMIN+'/preview?t='+Date.now();
-    img.alt = 'Logo aktif';
-    img.onerror = function(){ wrap.innerHTML='<span>Logo default GenieACS</span>'; };
-    img.onload  = function(){ wrap.innerHTML=''; wrap.appendChild(img); };
-  }
-
-  /* ── Message ── */
-  function showMsg(type, text){
-    var el = document.getElementById('rf-msg');
-    el.className = type; el.textContent = text;
-  }
-  function clearMsg(){
-    var el = document.getElementById('rf-msg');
-    el.className=''; el.textContent=''; el.style.display='none';
-  }
-
-  /* ── Upload via fetch ── */
-  function doUpload(){
-    var fileInput = document.getElementById('rf-file-input');
-    var file = fileInput.files[0];
-    if(!file){ showMsg('er','Pilih file terlebih dahulu.'); return; }
-    if(file.size > 2*1024*1024){ showMsg('er','File terlalu besar (maks 2 MB).'); return; }
-
-    var btn = document.getElementById('rf-upload-btn');
-    btn.disabled = true; btn.textContent = 'Mengupload...';
-
-    var fd = new FormData();
-    fd.append('logo', file);
-    fd.append('token', '__genie_session__');
-
-    fetch(ADMIN+'/upload', { method:'POST', body:fd, credentials:'include' })
-      .then(function(r){ return r.text(); })
-      .then(function(html){
-        var ok = html.indexOf('berhasil') >= 0 || html.indexOf('Logo berhasil') >= 0;
-        if(ok){
-          showMsg('ok','\\u2705 Logo berhasil diupload! Refresh halaman untuk melihat perubahan.');
-          loadPreview();
-          // Auto refresh logo di halaman utama tanpa full reload
-          var logoImgs = document.querySelectorAll('img[src*="logo"]');
-          logoImgs.forEach(function(img){
-            var s=img.src; img.src=''; img.src=s+'?t='+Date.now();
-          });
-        } else {
-          showMsg('er','\\u274C Gagal upload. Coba lagi.');
-        }
-      })
-      .catch(function(){ showMsg('er','\\u274C Error koneksi.'); })
-      .finally(function(){
-        btn.disabled=false; btn.innerHTML='&#8679; Upload Logo';
-      });
-  }
-
-  /* ── Reset via fetch ── */
-  function doReset(){
-    if(!confirm('Reset logo ke default GenieACS?')) return;
-    fetch(ADMIN+'/reset', {
-      method:'POST', credentials:'include',
-      headers:{'Content-Type':'application/x-www-form-urlencoded'},
-      body:'token=__genie_session__'
-    })
-    .then(function(r){ return r.text(); })
-    .then(function(html){
-      var ok = html.indexOf('direset') >= 0 || html.indexOf('default') >= 0;
-      showMsg(ok?'ok':'er', ok?'\\u2705 Logo direset ke default.':'\\u274C Gagal reset.');
-      if(ok) loadPreview();
-    })
-    .catch(function(){ showMsg('er','\\u274C Error koneksi.'); });
-  }
-
-  /* ── Event listeners ── */
-  function setup(){
-    document.getElementById('rf-modal-close').onclick = closeModal;
-    document.getElementById('rf-modal-backdrop').onclick = function(e){
-      if(e.target===this) closeModal();
-    };
-    document.getElementById('rf-upload-btn').onclick = doUpload;
-    document.getElementById('rf-reset-btn').onclick  = doReset;
-
-    // Drag & drop
-    var area = document.getElementById('rf-file-area');
-    area.addEventListener('dragover', function(e){ e.preventDefault(); area.classList.add('drag'); });
-    area.addEventListener('dragleave', function(){ area.classList.remove('drag'); });
-    area.addEventListener('drop', function(e){
-      e.preventDefault(); area.classList.remove('drag');
-      var f = e.dataTransfer.files[0];
-      if(f){ document.getElementById('rf-file-input').files;
-        // Assign via DataTransfer
-        var dt = new DataTransfer(); dt.items.add(f);
-        document.getElementById('rf-file-input').files = dt.files;
-        document.getElementById('rf-file-name').textContent = f.name+' ('+Math.round(f.size/1024)+' KB)';
-      }
-    });
-
-    // File name display
-    document.getElementById('rf-file-input').onchange = function(){
-      var f = this.files[0];
-      document.getElementById('rf-file-name').textContent = f
-        ? f.name+' ('+Math.round(f.size/1024)+' KB)'
-        : 'SVG / PNG / JPG / GIF / WebP \\u2014 maks 2 MB';
-    };
-
-    // Keyboard ESC close
-    document.addEventListener('keydown', function(e){
-      if(e.key==='Escape') closeModal();
-    });
-  }
-
-  /* ── Init ── */
-  function init(){
-    setup();
+  /* ── Startup ── */
+  function start(){
     injectNav();
-    // MutationObserver: inject segera saat DOM berubah (SPA render)
     var obs = new MutationObserver(function(){
       if(!document.getElementById('rf-nav-btn')) injectNav();
     });
-    obs.observe(document.body || document.documentElement, {childList:true, subtree:true});
+    obs.observe(document.documentElement,{childList:true,subtree:true});
   }
 
   if(document.readyState==='loading'){
-    document.addEventListener('DOMContentLoaded', init);
-  } else { init(); }
+    document.addEventListener('DOMContentLoaded',start);
+  } else { start(); }
 
-  // SPA navigation URL change (backup)
-  var last = location.href;
-  setInterval(function(){
-    if(location.href!==last){
-      last=location.href;
-      setTimeout(function(){ if(!document.getElementById('rf-nav-btn')) injectNav(); }, 100);
-    }
-  }, 300);
-
-  // Handle direct URL /__admin/logo → redirect ke dashboard + buka modal
+  // Handle direct URL /__admin/logo
   if(location.pathname==='/__admin/logo'){
     history.replaceState(null,'','/');
-    setTimeout(openModal, 600);
+    setTimeout(openModal,800);
   }
 })();
-</script>`;
+<\/script>`;
 
 function injectNavLink(html) {
     if (html.includes('</body>')) {
