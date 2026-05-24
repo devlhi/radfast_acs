@@ -297,6 +297,26 @@ mkdir -p "$INSTANCES_DIR"
 touch "$INSTANCES_DIR/.registry"
 success "Folder instances: $INSTANCES_DIR"
 
+# ── Buat shortcut command global ─────────────────────────────
+info "Membuat shortcut command global..."
+declare -A CMDS=(
+    ["radfast-status"]="$REPO_DIR/status.sh"
+    ["radfast-add"]="$REPO_DIR/add-instance.sh"
+    ["radfast-remove"]="$REPO_DIR/remove-instance.sh"
+    ["radfast-list"]="$REPO_DIR/list-instances.sh"
+)
+for CMD in "${!CMDS[@]}"; do
+    TARGET="${CMDS[$CMD]}"
+    LINK="/usr/local/bin/$CMD"
+    # Buat wrapper script (bukan symlink) supaya bash tetap bisa jalankan
+    cat > "$LINK" <<WRAPPER
+#!/bin/bash
+exec bash "$TARGET" "\$@"
+WRAPPER
+    chmod +x "$LINK"
+    success "Shortcut: $CMD  →  $TARGET"
+done
+
 # ── Ringkasan ────────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}${BOLD}============================================================${NC}"
@@ -308,7 +328,13 @@ echo -e "  MongoDB    : $(mongod --version 2>&1 | grep -oP 'v[\d.]+' | head -1)"
 echo -e "  App dir    : ${CYAN}$APP_DST${NC}"
 echo -e "  Instances  : ${CYAN}$INSTANCES_DIR${NC}"
 echo ""
-echo -e "  ${BOLD}Langkah selanjutnya:${NC}"
+echo -e "  ${BOLD}Shortcut command (bisa dijalankan dari mana saja):${NC}"
+echo -e "  ${CYAN}radfast-status${NC}   ← lihat status instance + resource"
+echo -e "  ${CYAN}radfast-list${NC}     ← lihat daftar semua instance"
+echo -e "  ${CYAN}radfast-add${NC}      ← tambah instance/user baru"
+echo -e "  ${CYAN}radfast-remove${NC}   ← hapus instance"
+echo ""
+echo -e "  ${BOLD}Atau dengan path lengkap:${NC}"
 echo -e "  ${YELLOW}sudo bash add-instance.sh${NC}     ← tambah instance/user baru"
 echo -e "  ${YELLOW}bash list-instances.sh${NC}        ← lihat semua instance"
 echo "============================================================"
