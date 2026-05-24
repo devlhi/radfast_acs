@@ -2,7 +2,7 @@
 # ============================================================
 #  GenieACS Multi-Instance — System Setup (jalankan SEKALI)
 #  Support: Ubuntu 20.04 / 22.04 / 24.04 / RHEL / CentOS
-#  Node.js : 18 LTS
+#  Node.js : 20 LTS
 #  MongoDB : 7.0
 #  By RadFast Bill
 # ============================================================
@@ -99,30 +99,34 @@ if [[ "$OS_TYPE" == "debian" ]]; then
 fi
 
 # ════════════════════════════════════════════════════════════
-#  INSTALL NODE.JS 18 LTS
+#  INSTALL NODE.JS 20 LTS
 # ════════════════════════════════════════════════════════════
-info "=== Node.js 18 LTS ==="
+info "=== Node.js 20 LTS ==="
 
 install_nodejs_18() {
     if [[ "$OS_TYPE" == "debian" ]]; then
 
-        # Deteksi apakah NodeSource sudah di-setup
-        if [[ -f /etc/apt/sources.list.d/nodesource.list ]] || \
-           ls /etc/apt/sources.list.d/nodejs* 2>/dev/null | grep -q .; then
-            info "NodeSource repo sudah ada, skip setup"
+        # Hapus repo NodeSource lama (node 18) jika ada, supaya tidak konflik
+        rm -f /etc/apt/sources.list.d/nodesource.list \
+              /etc/apt/sources.list.d/nodejs*.list \
+              /usr/share/keyrings/nodesource.gpg 2>/dev/null || true
+
+        # Deteksi apakah NodeSource sudah di-setup untuk node 20
+        if grep -r "node_20\|node/20" /etc/apt/sources.list.d/ &>/dev/null 2>&1; then
+            info "NodeSource repo Node 20 sudah ada, skip setup"
         else
             info "Menambahkan NodeSource repo (Node.js 18)..."
             # Ubuntu 24.04 butuh pendekatan keyring baru
-            if [[ "$OS_CODENAME" == "noble" ]]; then
-                # Method baru: manual keyring
+            if [[ "$OS_CODENAME" == "noble" || "$OS_CODENAME" == "jammy" || "$OS_CODENAME" == "focal" ]]; then
+                # Method baru: manual keyring (berlaku untuk semua Ubuntu)
                 curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
                     | gpg --dearmor -o /usr/share/keyrings/nodesource.gpg
                 echo "deb [signed-by=/usr/share/keyrings/nodesource.gpg] \
-https://deb.nodesource.com/node_18.x nodistro main" \
+https://deb.nodesource.com/node_20.x nodistro main" \
                     > /etc/apt/sources.list.d/nodesource.list
             else
-                # Method lama: setup script (Ubuntu 20/22)
-                curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+                # Fallback: setup script
+                curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
             fi
             apt-get update -qq
         fi
@@ -131,7 +135,7 @@ https://deb.nodesource.com/node_18.x nodistro main" \
 
     else
         # RHEL/CentOS
-        curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
+        curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
         yum install -y nodejs
     fi
 }
@@ -139,11 +143,13 @@ https://deb.nodesource.com/node_18.x nodistro main" \
 NODE_OK=false
 if command -v node &>/dev/null; then
     CURRENT_NODE=$(node -v 2>/dev/null | grep -oP '\d+' | head -1)
-    if [[ "${CURRENT_NODE:-0}" -ge 18 ]]; then
+    if [[ "${CURRENT_NODE:-0}" -ge 20 ]]; then
         success "Node.js sudah terinstall: $(node -v) (✓ kompatibel)"
         NODE_OK=true
+    elif [[ "${CURRENT_NODE:-0}" -ge 18 ]]; then
+        warn "Node.js $(node -v) terinstall tapi < v20 — akan diupgrade ke v20..."
     else
-        warn "Node.js ada tapi versi $(node -v) < 18 — akan diupgrade ke v18..."
+        warn "Node.js ada tapi versi $(node -v) < 18 — akan diupgrade ke v20..."
     fi
 fi
 

@@ -1,7 +1,7 @@
 # RadFast ACS
 
 **GenieACS v1.2.16 — Multi-Instance ACS Manager**  
-Support Ubuntu 20.04 / 22.04 / 24.04 | Node.js 18 | MongoDB 7.0  
+Support Ubuntu 20.04 / 22.04 / 24.04 | Node.js 20 LTS | MongoDB 7.0  
 By RadFast Bill
 
 ---
