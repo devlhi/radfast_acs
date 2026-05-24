@@ -141,12 +141,21 @@ fi
 } # end _MAIN
 
 # ══════════════════════════════════════════════════════════════
-#  ENTRYPOINT — deteksi pipe vs file
+#  ENTRYPOINT
+#  Cara jalankan (semua supported):
+#
+#  1. bash <(curl -fsSL URL)          ← PALING SIMPEL, langsung jalan
+#  2. bash <(wget -qO- URL)           ← alternatif wget
+#  3. curl URL -o /tmp/r.sh && bash /tmp/r.sh  ← cara lama
+#
+#  Deteksi:
+#  - bash <(curl ...) → stdin IS tty  → _MAIN langsung
+#  - curl | bash      → stdin bukan tty → download dulu (fallback)
 # ══════════════════════════════════════════════════════════════
 if [ ! -t 0 ]; then
-    # Dijalankan via pipe: stdin bukan terminal
-    # Tidak bisa jalankan _MAIN di sini karena bash masih baca
-    # script dari pipe. Unduh ke file dulu, exec dari file.
+    # Dijalankan via pipe langsung (curl|bash / wget|bash)
+    # stdin bukan terminal → interactive read tidak bisa
+    # Solusi: download ke file sementara lalu exec
     SELF="https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh"
     TMP=$(mktemp /tmp/radfast_XXXXXX.sh)
     printf '\033[1;33m[RadFast]\033[0m Mendownload installer ke %s\n' "$TMP"
@@ -159,6 +168,6 @@ if [ ! -t 0 ]; then
     printf '\033[0;32m[ OK ]\033[0m Download selesai. Menjalankan installer...\n\n'
     exec bash "$TMP" </dev/tty
 else
-    # Dijalankan langsung dari file (bash /tmp/r.sh) — jalan normal
+    # bash <(curl ...) atau bash file.sh — stdin terminal, langsung jalan
     _MAIN
 fi
