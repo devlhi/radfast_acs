@@ -110,6 +110,36 @@ function restoreOriginalLogos() {
 }
 
 // ════════════════════════════════════════════════════════════
+//  CSRF TOKEN STORE
+//  - Nonce sekali pakai, TTL 10 menit
+//  - Wajib ada di setiap POST upload/reset
+// ════════════════════════════════════════════════════════════
+const csrfStore = new Map(); // nonce → { exp, ip }
+const CSRF_TTL  = 10 * 60 * 1000; // 10 menit
+
+function genCSRF(ip) {
+    const nonce = crypto.randomBytes(24).toString('hex');
+    csrfStore.set(nonce, { exp: Date.now() + CSRF_TTL, ip });
+    return nonce;
+}
+function checkCSRF(nonce, ip) {
+    if (!nonce) return false;
+    const entry = csrfStore.get(nonce);
+    if (!entry) return false;
+    csrfStore.delete(nonce); // sekali pakai
+    if (Date.now() > entry.exp) return false;
+    // IP harus sama (optional strict, bisa dilemahkan jika di-proxy)
+    return entry.ip === ip;
+}
+// Cleanup CSRF kedaluwarsa tiap 5 menit
+setInterval(() => {
+    const now = Date.now();
+    for (const [k, v] of csrfStore.entries()) {
+        if (now > v.exp) csrfStore.delete(k);
+    }
+}, 5 * 60 * 1000);
+
+// ════════════════════════════════════════════════════════════
 //  RATE LIMITER
 //  - 5 gagal / menit → blokir 30 menit
 // ════════════════════════════════════════════════════════════
@@ -393,20 +423,21 @@ function deleteAllLogo() {
 // ════════════════════════════════════════════════════════════
 //  UPLOAD PAGE HTML
 // ════════════════════════════════════════════════════════════
-function uploadPage(msg = '', authed = false) {
+function uploadPage(msg = '', authed = false, csrfNonce = '') {
     const custom = findCustomLogo();
     const ts = Date.now();
 
     // Kalau sudah login GenieACS: tidak perlu isi token manual
+    const csrfHidden = csrfNonce ? `<input type="hidden" name="_csrf" value="${csrfNonce}">` : '';
     const tokenField = authed
-        ? `<input type="hidden" name="token" value="__genie_session__">`
+        ? `<input type="hidden" name="token" value="__genie_session__">${csrfHidden}`
         : `<label>🔑 Token Admin</label>
-           <input type="password" name="token" placeholder="Masukkan token admin" required autocomplete="new-password">`;
+           <input type="password" name="token" placeholder="Masukkan token admin" required autocomplete="new-password">${csrfHidden}`;
 
     const resetTokenField = authed
-        ? `<input type="hidden" name="token" value="__genie_session__">`
+        ? `<input type="hidden" name="token" value="__genie_session__">${csrfHidden}`
         : `<label>🔑 Token Admin</label>
-           <input type="password" name="token" placeholder="Token admin" required autocomplete="new-password">`;
+           <input type="password" name="token" placeholder="Token admin" required autocomplete="new-password">${csrfHidden}`;
 
     const authBadge = authed
         ? `<div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:6px;padding:8px 12px;font-size:13px;color:#2e7d32;margin-bottom:14px">
@@ -638,23 +669,36 @@ const NAV_INJECT = `<script>
       if(!f){setMsg('er','Pilih file terlebih dahulu.');return;}
       if(f.size>2*1024*1024){setMsg('er','File terlalu besar (maks 2 MB).');return;}
       upBtn.disabled=true; upBtn.textContent='Mengupload...';
-      var fd=new FormData(); fd.append('logo',f); fd.append('token','__genie_session__');
-      fetch(ADMIN+'/upload',{method:'POST',body:fd,credentials:'include'})
+      // Fetch CSRF token dulu (anti-CSRF)
+      fetch(ADMIN+'/csrf',{credentials:'include'})
+        .then(function(r){return r.ok?r.json():Promise.reject('csrf-fail');})
+        .then(function(j){
+          var fd=new FormData();
+          fd.append('logo',f);
+          fd.append('token','__genie_session__');
+          fd.append('_csrf', j.csrf||'');
+          return fetch(ADMIN+'/upload',{method:'POST',body:fd,credentials:'include'});
+        })
         .then(function(r){return r.text();})
         .then(function(t){
           var ok=t.indexOf('berhasil')>=0||t.indexOf('Logo berhasil')>=0;
           setMsg(ok?'ok':'er', ok?'✅ Logo berhasil diupload!':'❌ Gagal upload, coba lagi.');
           if(ok){ loadPrev(prev); refreshLogoImgs(); }
         })
-        .catch(function(){setMsg('er','❌ Error koneksi.');})
+        .catch(function(){setMsg('er','❌ Error koneksi atau token keamanan gagal.');})
         .finally(function(){upBtn.disabled=false;upBtn.textContent='Upload Logo';});
     });
 
     rmBtn.addEventListener('click', function(){
       if(!confirm('Reset logo ke default GenieACS?')) return;
-      fetch(ADMIN+'/reset',{method:'POST',credentials:'include',
-        headers:{'Content-Type':'application/x-www-form-urlencoded'},
-        body:'token=__genie_session__'})
+      // Fetch CSRF token dulu
+      fetch(ADMIN+'/csrf',{credentials:'include'})
+        .then(function(r){return r.ok?r.json():Promise.reject('csrf-fail');})
+        .then(function(j){
+          return fetch(ADMIN+'/reset',{method:'POST',credentials:'include',
+            headers:{'Content-Type':'application/x-www-form-urlencoded'},
+            body:'token=__genie_session__&_csrf='+encodeURIComponent(j.csrf||'')});
+        })
         .then(function(r){return r.text();})
         .then(function(t){
           var ok=t.indexOf('direset')>=0||t.indexOf('default')>=0;
@@ -839,17 +883,46 @@ const server = http.createServer((req, res) => {
     const url = req.url.split('?')[0].replace(/\/+$/, '') || '/';
     const ip  = getIP(req);
 
+    // ── Slow-loris / timeout protection ──────────────────────
+    req.socket.setTimeout(30000); // 30 detik max per koneksi
+    req.socket.on('timeout', () => { req.socket.destroy(); });
+
+    // ── Blokir Content-Length terlalu besar SEBELUM baca body ─
+    if (req.method === 'POST') {
+        const cl = parseInt(req.headers['content-length'] || '0', 10);
+        if (cl > MAX_SIZE + 65536) { // 64KB toleransi untuk header multipart
+            auditLog('REJECT', ip, `Content-Length terlalu besar: ${cl} bytes`);
+            sendSecure(res, 413, 'text/plain', 'Payload Too Large');
+            return;
+        }
+    }
+
     // ── Admin: tampilkan form ──────────────────────────────
     if (url === '/__admin/logo') {
         const authed = isGenieSession(req);
         if (!authed && !ADMIN_TOKEN) {
-            // Tidak ada session & tidak ada token → minta login dulu
             sendSecure(res, 302, 'text/html; charset=utf-8', '');
             res.setHeader('Location', '/');
             res.end();
             return;
         }
-        sendSecure(res, 200, 'text/html; charset=utf-8', uploadPage('', authed));
+        // Set CSRF token sebagai cookie HttpOnly SameSite=Strict
+        const nonce = genCSRF(ip);
+        res.setHeader('Set-Cookie', `_rfcsrf=${nonce}; HttpOnly; SameSite=Strict; Path=/__admin`);
+        sendSecure(res, 200, 'text/html; charset=utf-8', uploadPage('', authed, nonce));
+        return;
+    }
+
+    // ── Admin: endpoint CSRF token (untuk modal via fetch) ──
+    if (url === '/__admin/logo/csrf' && req.method === 'GET') {
+        const authed = isGenieSession(req);
+        if (!authed) {
+            sendSecure(res, 403, 'application/json', '{"error":"Unauthorized"}');
+            return;
+        }
+        const nonce = genCSRF(ip);
+        res.setHeader('Set-Cookie', `_rfcsrf=${nonce}; HttpOnly; SameSite=Strict; Path=/__admin`);
+        sendSecure(res, 200, 'application/json', JSON.stringify({ csrf: nonce }));
         return;
     }
 
@@ -925,6 +998,29 @@ const server = http.createServer((req, res) => {
                         uploadPage('<div class="msg er">❌ Akses ditolak. Login ke GenieACS dulu atau masukkan token yang benar.</div>', authed));
                     return;
                 }
+
+                // ── CSRF check (hanya untuk akses langsung/form, bukan modal AJAX) ──
+                // Modal kirim CSRF via field _csrf (fetch dari /__admin/logo/csrf)
+                // Kalau tidak ada CSRF field → pastikan Origin sama (AJAX dari dashboard)
+                const csrfField  = (parts._csrf && parts._csrf.value) || '';
+                const origin     = req.headers['origin'] || '';
+                const referer    = req.headers['referer'] || '';
+                const sameOrigin = origin.includes(`${req.headers.host}`) ||
+                                   referer.includes(`${req.headers.host}`);
+                if (csrfField) {
+                    if (!checkCSRF(csrfField, ip)) {
+                        recordFail(ip, 'CSRF token tidak valid');
+                        sendSecure(res, 403, 'text/html; charset=utf-8',
+                            uploadPage('<div class="msg er">❌ Token keamanan tidak valid. Muat ulang halaman dan coba lagi.</div>'));
+                        return;
+                    }
+                } else if (!sameOrigin && !bySession) {
+                    // Tidak ada CSRF field, bukan same-origin, bukan session → tolak
+                    recordFail(ip, 'CSRF missing + cross-origin');
+                    sendSecure(res, 403, 'text/plain', 'Forbidden');
+                    return;
+                }
+
                 if (bySession) auditLog('SESSION', ip, 'Upload via GenieACS session');
                 if (byToken)   auditLog('TOKEN',   ip, 'Upload via admin token');
 
@@ -937,7 +1033,15 @@ const server = http.createServer((req, res) => {
                 }
 
                 // ── Tentukan ekstensi dari nama file ────────
-                const origExt = path.extname(file.filename || '').toLowerCase();
+                const rawFilename = file.filename || '';
+                // Cegah null-byte injection (bypass ekstensi check)
+                if (rawFilename.includes('\x00') || rawFilename.includes('%00')) {
+                    recordFail(ip, 'Null byte dalam filename');
+                    sendSecure(res, 400, 'text/html; charset=utf-8',
+                        uploadPage('<div class="msg er">❌ Nama file tidak valid.</div>'));
+                    return;
+                }
+                const origExt = path.extname(rawFilename).toLowerCase();
                 if (!ALLOWED_EXT.includes(origExt)) {
                     recordFail(ip, `Ekstensi tidak diizinkan: ${origExt}`);
                     sendSecure(res, 400, 'text/html; charset=utf-8',
@@ -1008,7 +1112,9 @@ const server = http.createServer((req, res) => {
         req.on('end', () => {
             const body      = Buffer.concat(chunks).toString('utf-8', 0, 4096);
             const tokM      = body.match(/(?:^|&)token=([^&]*)/);
-            const tok       = tokM ? decodeURIComponent(tokM[1]) : '';
+            const csrfM     = body.match(/(?:^|&)_csrf=([^&]*)/);
+            const tok       = tokM  ? decodeURIComponent(tokM[1])  : '';
+            const csrfVal   = csrfM ? decodeURIComponent(csrfM[1]) : '';
             const bySession = tok === '__genie_session__' && isGenieSession(req);
             const byToken   = !bySession && safeTokenCheck(tok);
             const authed    = isGenieSession(req);
@@ -1017,6 +1123,23 @@ const server = http.createServer((req, res) => {
                 recordFail(ip, 'Token salah saat reset');
                 sendSecure(res, 403, 'text/html; charset=utf-8',
                     uploadPage('<div class="msg er">❌ Akses ditolak.</div>', authed));
+                return;
+            }
+
+            // CSRF check
+            const origin    = req.headers['origin'] || '';
+            const referer   = req.headers['referer'] || '';
+            const sameOrig  = origin.includes(req.headers.host) || referer.includes(req.headers.host);
+            if (csrfVal) {
+                if (!checkCSRF(csrfVal, ip)) {
+                    recordFail(ip, 'CSRF invalid saat reset');
+                    sendSecure(res, 403, 'text/html; charset=utf-8',
+                        uploadPage('<div class="msg er">❌ Token keamanan tidak valid. Muat ulang halaman.</div>', authed));
+                    return;
+                }
+            } else if (!sameOrig && !bySession) {
+                recordFail(ip, 'CSRF missing cross-origin reset');
+                sendSecure(res, 403, 'text/plain', 'Forbidden');
                 return;
             }
 
