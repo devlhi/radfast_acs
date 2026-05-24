@@ -6,40 +6,37 @@ By RadFast Bill
 
 ---
 
-## Cara Install di VPS
+## ⚡ Install (Cara Tercepat)
 
-### 1. Clone repo
-
-```bash
-git clone https://github.com/devlhi/radfast_acs.git
-cd radfast_acs
-```
-
-### 2. Setup sistem (jalankan SEKALI saja)
-
-Perintah ini akan install Node.js 18, MongoDB 7.0, dan deploy app GenieACS.
+Cukup jalankan **satu perintah** di VPS:
 
 ```bash
-sudo bash setup-system.sh
+wget -qO- https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh | sudo bash
 ```
+
+atau pakai curl:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh | sudo bash
+```
+
+> Script akan otomatis:
+> 1. Install Node.js 18, MongoDB 7.0, Git
+> 2. Clone repo ke `/opt/radfast_acs`
+> 3. Deploy GenieACS ke `/opt/genieacs-app`
+> 4. Tanya apakah langsung tambah instance/user
 
 ---
 
-## Tambah Instance / User Baru
+## Tambah User/Instance Baru
 
-Setiap user mendapat folder sendiri, database sendiri, dan port sendiri (otomatis).
-
-```bash
-sudo bash add-instance.sh
-```
-
-Atau langsung dengan nama:
+Setiap user mendapat port sendiri, database sendiri, folder sendiri — otomatis.
 
 ```bash
-sudo bash add-instance.sh namauser
+sudo bash /opt/radfast_acs/add-instance.sh
 ```
 
-Contoh output:
+Contoh hasil:
 ```
   User     : alice
   UI Port  : 3001   → http://1.2.3.4:3001
@@ -54,32 +51,37 @@ Contoh output:
 ## Lihat Semua Instance
 
 ```bash
-bash list-instances.sh
+bash /opt/radfast_acs/list-instances.sh
 ```
-
-Menampilkan semua instance beserta port, status service, dan URL akses.
 
 ---
 
 ## Hapus Instance
 
 ```bash
-sudo bash remove-instance.sh namauser
+sudo bash /opt/radfast_acs/remove-instance.sh namauser
 ```
 
-> ⚠️ Database MongoDB instance tersebut akan ikut dihapus permanen.
+> ⚠️ Database MongoDB instance tersebut ikut dihapus permanen.
 
 ---
 
 ## Update ke Versi Terbaru
 
+Cukup jalankan ulang perintah install — script otomatis `git pull` jika repo sudah ada:
+
 ```bash
-cd radfast_acs
-git pull
+wget -qO- https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh | sudo bash
+```
+
+Atau manual:
+
+```bash
+cd /opt/radfast_acs && git pull
 sudo bash setup-system.sh
 ```
 
-> Instance yang sudah berjalan tidak terganggu. App baru akan di-deploy ke `/opt/genieacs-app`.  
+> Instance yang sudah berjalan **tidak terganggu**.  
 > Restart service untuk pakai versi terbaru:
 > ```bash
 > sudo systemctl restart genieacs-NAMAUSER-cwmp
@@ -91,6 +93,7 @@ sudo bash setup-system.sh
 ## Struktur di VPS Setelah Install
 
 ```
+/opt/radfast_acs/               ← Script installer (dari repo ini)
 /opt/genieacs-app/              ← App GenieACS (shared, 1 copy)
 /opt/genieacs-instances/
 ├── .registry                   ← Daftar semua instance
@@ -111,10 +114,10 @@ genieacs-alice-ui.service
 
 ---
 
-## Port Default (auto-increment jika sudah dipakai)
+## Port (Auto-Increment Jika Sudah Dipakai)
 
-| Service | Port Awal |
-|---------|-----------|
+| Service | Port Mulai |
+|---------|------------|
 | UI      | 3001, 3002, 3003... |
 | CWMP    | 7548, 7549, 7550... |
 | NBI     | 7558, 7559, 7560... |
@@ -125,10 +128,10 @@ genieacs-alice-ui.service
 ## Manage Instance
 
 ```bash
-# Cek status
+# Status
 systemctl status genieacs-alice-ui
 
-# Lihat log realtime
+# Log realtime
 journalctl -u genieacs-alice-ui -f
 
 # Restart
@@ -136,16 +139,8 @@ systemctl restart genieacs-alice-cwmp
 systemctl restart genieacs-alice-ui
 
 # Stop semua service 1 instance
-systemctl stop genieacs-alice-cwmp genieacs-alice-fs genieacs-alice-nbi genieacs-alice-ui
+systemctl stop genieacs-alice-{cwmp,fs,nbi,ui}
 ```
-
----
-
-## Persyaratan VPS
-
-- OS: Ubuntu 20.04 / 22.04 / 24.04 (atau RHEL/CentOS)
-- RAM: minimal 1 GB per instance
-- Akses root / sudo
 
 ---
 
@@ -153,7 +148,15 @@ systemctl stop genieacs-alice-cwmp genieacs-alice-fs genieacs-alice-nbi genieacs
 
 | OS | Status |
 |----|--------|
-| Ubuntu 20.04 (Focal)  | ✅ |
-| Ubuntu 22.04 (Jammy)  | ✅ |
-| Ubuntu 24.04 (Noble)  | ✅ |
-| RHEL / CentOS         | ✅ |
+| Ubuntu 20.04 (Focal) | ✅ |
+| Ubuntu 22.04 (Jammy) | ✅ |
+| Ubuntu 24.04 (Noble) | ✅ |
+| RHEL / CentOS        | ✅ |
+
+---
+
+## Persyaratan VPS
+
+- RAM minimal 512 MB (rekomendasi 1 GB per instance)
+- Akses root / sudo
+- Port tidak diblokir firewall
