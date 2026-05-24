@@ -25,6 +25,11 @@ echo -e "${NC}"
 
 [[ $EUID -ne 0 ]] && error "Jalankan sebagai root: sudo bash setup-system.sh"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="${SCRIPT_DIR}"   # folder repo = folder script ini berada
+APP_DST="/opt/genieacs-app"
+INSTANCES_DIR="/opt/genieacs-instances"
+
 # ── Deteksi OS & Ubuntu version ──────────────────────────────
 if [[ -f /etc/os-release ]]; then
     . /etc/os-release
@@ -66,10 +71,6 @@ elif [[ -f /etc/redhat-release ]]; then
 else
     error "OS tidak didukung. Butuh Ubuntu 20/22/24 atau RHEL/CentOS."
 fi
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-APP_DST="/opt/genieacs-app"
-INSTANCES_DIR="/opt/genieacs-instances"
 
 # Cari folder genieacs-app (support beberapa struktur folder)
 if [[ -d "$SCRIPT_DIR/source-deob/genieacs-app" ]]; then
