@@ -634,41 +634,34 @@ const NAV_INJECT = `
   /* ── Inject nav button ── */
   function injectNav(){
     if(document.getElementById('rf-nav-btn')) return;
-    var btn = document.createElement('button');
-    btn.id = 'rf-nav-btn';
-    btn.title = 'Upload Logo';
-    btn.textContent = 'Logo';
-    btn.onclick = openModal;
 
-    // Cari tab Admin atau tab lain di nav GenieACS
-    // GenieACS pakai <a> tag untuk nav tabs
-    var adminLink = Array.from(document.querySelectorAll('a,button')).find(function(el){
-      var t = el.textContent.trim();
-      return t === 'Admin' || t === 'Faults' || t === 'Devices';
+    // Cari tab "Overview" untuk ambil referensi style
+    var overviewEl = Array.from(document.querySelectorAll('a,li,span,div')).find(function(el){
+      return el.textContent.trim() === 'Overview' && el.offsetParent !== null;
     });
-    if(adminLink && adminLink.parentNode){
-      // Clone style dari elemen tab yang ada
-      var clone = adminLink.cloneNode(false);
-      clone.id = 'rf-nav-btn';
-      clone.textContent = 'Logo';
-      clone.removeAttribute('href');
-      clone.onclick = openModal;
-      adminLink.parentNode.insertBefore(clone, adminLink.nextSibling);
-      return;
-    }
-    // Fallback: cari "Log out" link
-    var logout = Array.from(document.querySelectorAll('a')).find(function(a){
-      return a.textContent.trim().toLowerCase()==='log out';
+    if(!overviewEl) return; // Nav belum render, MutationObserver akan coba lagi
+
+    // Buat elemen dengan tag yang sama persis dengan Overview
+    var tag = overviewEl.tagName.toLowerCase();
+    var btn = document.createElement(tag);
+    btn.id = 'rf-nav-btn';
+    btn.textContent = 'Logo';
+
+    // Copy semua attribute class dari Overview agar style identik
+    if(overviewEl.className) btn.className = overviewEl.className;
+    // Pastikan tidak navigasi ke mana-mana
+    if(tag === 'a'){ btn.href = 'javascript:void(0)'; btn.removeAttribute('href'); }
+    btn.style.cursor = 'pointer';
+
+    // Tambahkan event listener (lebih reliable dari onclick)
+    btn.addEventListener('click', function(e){
+      e.preventDefault();
+      e.stopPropagation();
+      openModal();
     });
-    if(logout && logout.parentNode){
-      var sep = document.createTextNode(' | ');
-      logout.parentNode.insertBefore(sep, logout);
-      logout.parentNode.insertBefore(btn, sep);
-      return;
-    }
-    var nav = document.querySelector('nav');
-    if(nav){ nav.appendChild(btn); return; }
-    document.body && document.body.appendChild(btn);
+
+    // Sisipkan tepat setelah Overview
+    overviewEl.parentNode.insertBefore(btn, overviewEl.nextSibling);
   }
 
   /* ── Modal open/close ── */
