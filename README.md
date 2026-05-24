@@ -11,22 +11,22 @@ By RadFast Bill
 
 ## ⚡ Install (Cara Tercepat)
 
-Cukup jalankan **satu perintah** di VPS — tidak perlu simpan file dulu:
+Cukup jalankan **satu perintah** di VPS:
+
+**Pakai wget (direkomendasikan):**
+```bash
+wget -O /tmp/r.sh https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh && sudo bash /tmp/r.sh
+```
 
 **Pakai curl:**
 ```bash
-sudo bash <(curl -fsSL https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh)
+curl -fsSL https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh -o /tmp/r.sh && sudo bash /tmp/r.sh
 ```
 
-**Pakai wget:**
-```bash
-sudo bash <(wget -qO- https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh)
-```
-
-> **Kenapa `bash <(...)` bukan `curl | bash`?**  
-> `curl | bash` menyebabkan layar blank — bash baca script dari pipe sehingga  
-> prompt interaktif tidak bisa jalan. `bash <(...)` pakai process substitution,  
-> stdin tetap terminal → semua prompt tampil normal.
+> **Kenapa tidak `curl | bash` langsung?**  
+> `bash <(curl ...)` tidak jalan di LXC container (tidak ada `/dev/fd`).  
+> `curl | bash` menyebabkan prompt interaktif tidak tampil.  
+> Download ke `/tmp/r.sh` dulu adalah cara **paling kompatibel** di semua sistem.
 
 > Script otomatis:
 > 1. Install Node.js 20 LTS, MongoDB 7.0/8.0, Git

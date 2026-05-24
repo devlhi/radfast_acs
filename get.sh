@@ -142,15 +142,19 @@ fi
 
 # ══════════════════════════════════════════════════════════════
 #  ENTRYPOINT
-#  Cara jalankan (semua supported):
+#  Cara jalankan yang direkomendasikan:
 #
-#  1. bash <(curl -fsSL URL)          ← PALING SIMPEL, langsung jalan
-#  2. bash <(wget -qO- URL)           ← alternatif wget
-#  3. curl URL -o /tmp/r.sh && bash /tmp/r.sh  ← cara lama
+#  wget -O /tmp/r.sh URL && sudo bash /tmp/r.sh   ← paling kompatibel
+#  curl URL -o /tmp/r.sh && sudo bash /tmp/r.sh   ← alternatif curl
+#
+#  TIDAK direkomendasikan:
+#  bash <(curl ...) → tidak jalan di LXC (tidak ada /dev/fd)
+#  curl | bash      → stdin bukan tty → prompt interaktif tidak tampil
+#                     (script handle otomatis via download ke tmpfile)
 #
 #  Deteksi:
-#  - bash <(curl ...) → stdin IS tty  → _MAIN langsung
-#  - curl | bash      → stdin bukan tty → download dulu (fallback)
+#  - bash file.sh  → stdin IS tty  → _MAIN langsung
+#  - curl | bash   → stdin bukan tty → download ke tmpfile dulu
 # ══════════════════════════════════════════════════════════════
 if [ ! -t 0 ]; then
     # Dijalankan via pipe langsung (curl|bash / wget|bash)
