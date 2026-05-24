@@ -264,13 +264,13 @@ function sanitizeSVG(buf) {
 // ════════════════════════════════════════════════════════════
 //  SECURITY HTTP HEADERS
 // ════════════════════════════════════════════════════════════
+// SEC_HEADERS untuk halaman upload admin (strict, no script)
 const SEC_HEADERS = {
     'X-Content-Type-Options' : 'nosniff',
     'X-Frame-Options'        : 'DENY',
     'X-XSS-Protection'       : '1; mode=block',
     'Referrer-Policy'        : 'no-referrer',
     'Cache-Control'          : 'no-store, no-cache',
-    // Strict CSP: tidak boleh ada script sama sekali
     'Content-Security-Policy': "default-src 'self'; script-src 'none'; object-src 'none'; base-uri 'none';"
 };
 
@@ -433,26 +433,73 @@ function parseMultipart(body, boundary) {
 }
 
 // ════════════════════════════════════════════════════════════
-//  TOMBOL FLOATING — inject ke setiap halaman GenieACS
+//  INJECT LOGO LINK — masuk ke navbar GenieACS
+//  Inject link "🖼 Logo" sejajar dengan tab nav yang ada.
+//  Tidak menggunakan position:fixed agar tidak nutup konten.
 // ════════════════════════════════════════════════════════════
-const FLOATING_BTN = `
-<style>
-#radfast-logo-btn{
-  position:fixed;bottom:18px;right:18px;z-index:99999;
-  background:#2980b9;color:#fff;padding:8px 14px 8px 10px;
-  border-radius:22px;text-decoration:none;
-  font-family:Arial,sans-serif;font-size:13px;font-weight:bold;
-  box-shadow:0 3px 10px rgba(0,0,0,.25);
-  display:flex;align-items:center;gap:6px;
-  transition:background .2s,transform .1s;
-  border:2px solid rgba(255,255,255,.3);
+const NAV_INJECT = `<style>
+#radfast-logo-nav{
+  color:inherit;text-decoration:none;
+  padding:0 12px;opacity:.75;
+  font-size:inherit;white-space:nowrap;
 }
-#radfast-logo-btn:hover{background:#1a6fa3;transform:scale(1.04)}
-#radfast-logo-btn span{font-size:16px}
+#radfast-logo-nav:hover{opacity:1;text-decoration:underline}
 </style>
-<a id="radfast-logo-btn" href="/__admin/logo" title="Upload Logo">
-  <span>🖼</span> Upload Logo
-</a>`;
+<script>
+(function(){
+  // Inject link setelah semua tab nav selesai render
+  // Cari anchor terakhir di nav, tambahkan link upload logo di sampingnya
+  function inject(){
+    if(document.getElementById('radfast-logo-nav')) return;
+    var link = document.createElement('a');
+    link.id = 'radfast-logo-nav';
+    link.href = '/__admin/logo';
+    link.title = 'Upload Logo';
+    link.textContent = '\\uD83D\\uDDBC\\uFE0F Logo';
+
+    // Coba tempatkan di samping "Log out"
+    var logout = Array.from(document.querySelectorAll('a')).find(function(a){
+      return a.textContent.trim().toLowerCase()==='log out';
+    });
+    if(logout && logout.parentNode){
+      logout.parentNode.insertBefore(link, logout);
+      logout.parentNode.insertBefore(document.createTextNode(' | '), logout);
+      return;
+    }
+
+    // Fallback: tambah ke <nav> pertama
+    var nav = document.querySelector('nav');
+    if(nav){ nav.appendChild(link); return; }
+
+    // Last resort: fixed di pojok kanan atas, tapi kecil & tidak mengganggu
+    link.style.cssText = 'position:fixed;top:6px;right:80px;z-index:9999;'+
+      'background:rgba(0,0,0,.45);color:#fff;padding:3px 10px;'+
+      'border-radius:12px;font-size:12px;text-decoration:none;';
+    document.body && document.body.appendChild(link);
+  }
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded', inject);
+  } else {
+    inject();
+  }
+  // GenieACS SPA: observe URL change
+  var last = location.href;
+  setInterval(function(){
+    if(location.href!==last){ last=location.href; setTimeout(inject,300); }
+  }, 500);
+})();
+</script>`;
+
+function injectNavLink(html) {
+    // Inject script ke sebelum </body> — script akan inject link ke DOM
+    if (html.includes('</body>')) {
+        return html.replace('</body>', NAV_INJECT + '</body>');
+    }
+    if (html.includes('</html>')) {
+        return html.replace('</html>', NAV_INJECT + '</html>');
+    }
+    return html + NAV_INJECT;
+}
 
 // ════════════════════════════════════════════════════════════
 //  PROXY KE GENIEACS UI
@@ -482,22 +529,17 @@ function proxyRequest(req, res) {
             pRes.on('end', () => {
                 let html = Buffer.concat(chunks).toString('utf-8');
 
-                // Inject tombol sebelum </body>
-                if (html.includes('</body>')) {
-                    html = html.replace('</body>', FLOATING_BTN + '</body>');
-                } else if (html.includes('</html>')) {
-                    html = html.replace('</html>', FLOATING_BTN + '</html>');
-                } else {
-                    // Fallback: append di akhir
-                    html += FLOATING_BTN;
-                }
-                console.log(`[proxy] inject btn → ${req.url} (${html.length} bytes)`);
+                // Inject link logo ke navbar GenieACS
+                html = injectNavLink(html);
 
-                // Hapus content-length lama (sudah berubah) & content-encoding
+                // Bersihkan headers yang perlu diupdate
                 const respHeaders = { ...pRes.headers };
                 delete respHeaders['content-length'];
                 delete respHeaders['content-encoding'];
                 delete respHeaders['transfer-encoding'];
+                // Hapus CSP dari GenieACS agar script inject kita bisa jalan
+                delete respHeaders['content-security-policy'];
+                delete respHeaders['x-content-security-policy'];
 
                 const buf = Buffer.from(html, 'utf-8');
                 respHeaders['content-length'] = buf.length;
@@ -720,21 +762,32 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    // ── Intercept logo GenieACS → serve custom jika ada ───
-    // Match semua variasi URL logo GenieACS:
-    // /public/logo.svg, /public/logo-abc.svg, /public/logo-white.svg, dll
-    if (/\/public\/logo[^/]*\.(svg|png|jpe?g|gif|webp|ico|bmp)/i.test(req.url)) {
+    // ── Intercept semua request logo GenieACS ─────────────
+    // GenieACS pakai nama seperti:
+    //   /public/logo-white.svg
+    //   /public/logo-favicon.svg
+    //   /public/logo.svg
+    //   /public/logo-<hash>.svg
+    // Tangkap semua path yang ada kata "logo" di bawah /public/
+    // dengan ekstensi gambar apapun.
+    const isLogoReq = /\/public\/[^/]*logo[^/]*\.(svg|png|jpe?g|gif|webp|ico|bmp)/i.test(req.url);
+    if (isLogoReq) {
         const custom = findCustomLogo();
         if (custom) {
             const ext = path.extname(custom).toLowerCase();
+            // Log untuk debug
+            console.log(`[logo] intercept ${req.url} → serve custom: ${custom}`);
             res.writeHead(200, {
                 'Content-Type'          : MIME[ext] || 'image/svg+xml',
-                'Cache-Control'         : 'no-cache',
+                'Cache-Control'         : 'no-store, no-cache, must-revalidate',
+                'Pragma'                : 'no-cache',
+                'Expires'               : '0',
                 'X-Content-Type-Options': 'nosniff'
             });
             fs.createReadStream(custom).pipe(res);
             return;
         }
+        // Tidak ada custom logo → pass-through ke GenieACS (logo default)
     }
 
     // ── Semua request lain → proxy GenieACS ───────────────
