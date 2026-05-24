@@ -352,24 +352,87 @@ function parseMultipart(body, boundary) {
 }
 
 // ════════════════════════════════════════════════════════════
+//  TOMBOL FLOATING — inject ke setiap halaman GenieACS
+// ════════════════════════════════════════════════════════════
+const FLOATING_BTN = `
+<style>
+#radfast-logo-btn{
+  position:fixed;bottom:18px;right:18px;z-index:99999;
+  background:#2980b9;color:#fff;padding:8px 14px 8px 10px;
+  border-radius:22px;text-decoration:none;
+  font-family:Arial,sans-serif;font-size:13px;font-weight:bold;
+  box-shadow:0 3px 10px rgba(0,0,0,.25);
+  display:flex;align-items:center;gap:6px;
+  transition:background .2s,transform .1s;
+  border:2px solid rgba(255,255,255,.3);
+}
+#radfast-logo-btn:hover{background:#1a6fa3;transform:scale(1.04)}
+#radfast-logo-btn span{font-size:16px}
+</style>
+<a id="radfast-logo-btn" href="/__admin/logo" title="Upload Logo">
+  <span>🖼</span> Upload Logo
+</a>`;
+
+// ════════════════════════════════════════════════════════════
 //  PROXY KE GENIEACS UI
+//  - Strip Accept-Encoding supaya response tidak gzip
+//    (agar bisa inject tombol ke HTML)
 // ════════════════════════════════════════════════════════════
 function proxyRequest(req, res) {
+    // Hapus Accept-Encoding agar GenieACS kirim HTML plain (bukan gzip)
+    const headers = { ...req.headers, host: `127.0.0.1:${GENIE_PORT}` };
+    delete headers['accept-encoding'];
+
     const opts = {
         hostname : '127.0.0.1',
         port     : GENIE_PORT,
         path     : req.url,
         method   : req.method,
-        headers  : { ...req.headers, host: `127.0.0.1:${GENIE_PORT}` }
+        headers
     };
+
     const proxy = http.request(opts, (pRes) => {
-        res.writeHead(pRes.statusCode, pRes.headers);
-        pRes.pipe(res);
+        const ct = (pRes.headers['content-type'] || '');
+
+        // Inject tombol hanya ke halaman HTML
+        if (ct.includes('text/html')) {
+            const chunks = [];
+            pRes.on('data', c => chunks.push(c));
+            pRes.on('end', () => {
+                let html = Buffer.concat(chunks).toString('utf-8');
+
+                // Inject tombol sebelum </body>
+                if (html.includes('</body>')) {
+                    html = html.replace('</body>', FLOATING_BTN + '</body>');
+                } else {
+                    html += FLOATING_BTN; // fallback kalau tidak ada </body>
+                }
+
+                // Hapus content-length lama (sudah berubah) & content-encoding
+                const respHeaders = { ...pRes.headers };
+                delete respHeaders['content-length'];
+                delete respHeaders['content-encoding'];
+                delete respHeaders['transfer-encoding'];
+
+                const buf = Buffer.from(html, 'utf-8');
+                respHeaders['content-length'] = buf.length;
+
+                res.writeHead(pRes.statusCode, respHeaders);
+                res.end(buf);
+            });
+            pRes.on('error', () => res.end());
+        } else {
+            // Non-HTML (JS, CSS, JSON, dll) — pass-through biasa
+            res.writeHead(pRes.statusCode, pRes.headers);
+            pRes.pipe(res);
+        }
     });
+
     proxy.on('error', () => {
         res.writeHead(502, { 'Content-Type': 'text/plain' });
         res.end('502 — GenieACS UI tidak berjalan');
     });
+
     req.pipe(proxy);
 }
 
