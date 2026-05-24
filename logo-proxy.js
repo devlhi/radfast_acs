@@ -645,23 +645,7 @@ const NAV_INJECT = `<script>
     inp.addEventListener('change', function(){
       var f=inp.files[0];
       fname.textContent = f ? f.name+' ('+Math.round(f.size/1024)+' KB)' : 'SVG / PNG / JPG / GIF / WebP — maks 2 MB';
-      // Preview file yang dipilih sebelum upload
-      if(f){
-        var reader = new FileReader();
-        reader.onload = function(e){
-          var img = document.createElement('img');
-          img.src = e.target.result;
-          img.alt = 'Preview';
-          img.style.cssText = 'max-height:80px;max-width:100%;object-fit:contain;border-radius:3px;';
-          var lbl = document.createElement('div');
-          lbl.textContent = 'Preview (belum diupload)';
-          lbl.style.cssText = 'font-size:11px;color:#e67e22;margin-top:4px;font-style:italic;';
-          prev.innerHTML = '';
-          prev.appendChild(img);
-          prev.appendChild(lbl);
-        };
-        reader.readAsDataURL(f);
-      }
+      if(f) safePreview(f, prev);
     });
     // Drag & drop
     area.addEventListener('dragover',function(e){e.preventDefault();area.style.borderColor='#8a7d50';});
@@ -669,20 +653,10 @@ const NAV_INJECT = `<script>
     area.addEventListener('drop',function(e){
       e.preventDefault(); area.style.borderColor='';
       var f=e.dataTransfer&&e.dataTransfer.files[0];
-      if(f){ try{ var dt=new DataTransfer(); dt.items.add(f); inp.files=dt.files; }catch(ex){}
+      if(f){
+        try{ var dt=new DataTransfer(); dt.items.add(f); inp.files=dt.files; }catch(ex){}
         fname.textContent=f.name+' ('+Math.round(f.size/1024)+' KB)';
-        // Preview via FileReader
-        var reader=new FileReader();
-        reader.onload=function(ev){
-          var img=document.createElement('img');
-          img.src=ev.target.result;
-          img.style.cssText='max-height:80px;max-width:100%;object-fit:contain;border-radius:3px;';
-          var lbl=document.createElement('div');
-          lbl.textContent='Preview (belum diupload)';
-          lbl.style.cssText='font-size:11px;color:#e67e22;margin-top:4px;font-style:italic;';
-          prev.innerHTML=''; prev.appendChild(img); prev.appendChild(lbl);
-        };
-        reader.readAsDataURL(f);
+        safePreview(f, prev);
       }
     });
     area.appendChild(inp); area.appendChild(lbl); area.appendChild(fname);
@@ -747,6 +721,143 @@ const NAV_INJECT = `<script>
 
     _modal = bd;
     return bd;
+  }
+
+  /* ════════════════════════════════════════
+     SAFE PREVIEW — cegah XSS via SVG inject
+     1. Whitelist ekstensi & MIME
+     2. SVG: strip semua script/event handler
+        sebelum render (client-side sanitize)
+     3. Bungkus dalam Blob dengan MIME eksplisit
+        → img.src = blob URL (bukan inline data)
+     4. Revoke blob URL setelah render selesai
+  ════════════════════════════════════════ */
+  var SAFE_MIME = {
+    'svg' :'image/svg+xml','png':'image/png',
+    'jpg' :'image/jpeg','jpeg':'image/jpeg',
+    'gif' :'image/gif','webp':'image/webp',
+    'ico' :'image/x-icon','bmp':'image/bmp'
+  };
+
+  function sanitizeSVGClient(svgText){
+    // Hapus <script> dan isinya
+    svgText = svgText.replace(/<script[\s\S]*?<\/script\s*>/gi,'');
+    svgText = svgText.replace(/<script[^>]*\/>/gi,'');
+    // Hapus <foreignObject> (bisa embed HTML)
+    svgText = svgText.replace(/<foreignObject[\s\S]*?<\/foreignObject\s*>/gi,'');
+    // Hapus semua event handler (on*)
+    svgText = svgText.replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi,'');
+    // Hapus javascript: di href/src/xlink:href
+    svgText = svgText.replace(/(href|xlink:href|src|action)\s*=\s*["']\s*javascript:[^"']*/gi,
+      function(m,a){return a+'="#"';});
+    // Hapus data: URI di href/src (bisa load HTML)
+    svgText = svgText.replace(/(href|xlink:href|src)\s*=\s*["']\s*data:[^"']*/gi,
+      function(m,a){return a+'="#"';});
+    // Hapus url(javascript:...) dan url(data:...) di style
+    svgText = svgText.replace(/url\s*\(\s*["']?\s*(?:javascript|data):[^)]*["']?\s*\)/gi,'url(#)');
+    // Hapus -moz-binding dan expression()
+    svgText = svgText.replace(/(?:-moz-binding|expression)\s*[:(][^;")']*/gi,'');
+    // Hapus <?xml-stylesheet ... ?> (load CSS eksternal)
+    svgText = svgText.replace(/<\?xml-stylesheet[^?]*\?>/gi,'');
+    // Hapus <!DOCTYPE (XXE)
+    svgText = svgText.replace(/<!DOCTYPE[^>]*>/gi,'');
+    return svgText;
+  }
+
+  function safePreview(file, prevEl){
+    // 1. Validasi ekstensi
+    var name = (file.name||'').toLowerCase();
+    var dotIdx = name.lastIndexOf('.');
+    var ext = dotIdx>=0 ? name.slice(dotIdx+1) : '';
+    // Cegah null-byte dan double-extension trick
+    if(!ext || !SAFE_MIME[ext] || name.indexOf('\x00')>=0){
+      prevEl.innerHTML='<span style="color:#c0392b;font-size:12px">&#9888; Tipe file tidak didukung untuk preview.</span>';
+      return;
+    }
+    // 2. Validasi ukuran (sudah di-cap 2MB tapi double-check)
+    if(file.size > 2*1024*1024){
+      prevEl.innerHTML='<span style="color:#c0392b;font-size:12px">&#9888; File terlalu besar.</span>';
+      return;
+    }
+
+    var safeMime = SAFE_MIME[ext];
+
+    if(ext==='svg'){
+      // SVG: baca teks, sanitasi, lalu bungkus dalam Blob
+      var reader = new FileReader();
+      reader.onload = function(e){
+        try{
+          var cleaned = sanitizeSVGClient(e.target.result);
+          // Pastikan masih valid SVG setelah sanitasi
+          if(!/<svg[\s>]/i.test(cleaned)){
+            prevEl.innerHTML='<span style="color:#c0392b;font-size:12px">&#9888; SVG tidak valid.</span>';
+            return;
+          }
+          var blob = new Blob([cleaned],{type:'image/svg+xml'});
+          renderPreviewBlob(blob, prevEl);
+        }catch(ex){
+          prevEl.innerHTML='<span style="color:#c0392b;font-size:12px">&#9888; Gagal memuat SVG.</span>';
+        }
+      };
+      reader.onerror=function(){
+        prevEl.innerHTML='<span style="color:#c0392b;font-size:12px">&#9888; Gagal baca file.</span>';
+      };
+      reader.readAsText(file);
+    } else {
+      // Non-SVG: buat Blob dengan MIME eksplisit (bukan dari file asli)
+      var reader2 = new FileReader();
+      reader2.onload = function(e){
+        try{
+          // Validasi magic bytes minimal (4 byte pertama)
+          var arr = new Uint8Array(e.target.result.slice(0,12));
+          if(!checkMagic(arr, ext)){
+            prevEl.innerHTML='<span style="color:#c0392b;font-size:12px">&#9888; Format file tidak sesuai ekstensi.</span>';
+            return;
+          }
+          var blob = new Blob([e.target.result],{type:safeMime});
+          renderPreviewBlob(blob, prevEl);
+        }catch(ex){
+          prevEl.innerHTML='<span style="color:#c0392b;font-size:12px">&#9888; Gagal memuat gambar.</span>';
+        }
+      };
+      reader2.onerror=function(){
+        prevEl.innerHTML='<span style="color:#c0392b;font-size:12px">&#9888; Gagal baca file.</span>';
+      };
+      reader2.readAsArrayBuffer(file);
+    }
+  }
+
+  function renderPreviewBlob(blob, prevEl){
+    var url = URL.createObjectURL(blob);
+    var img = document.createElement('img');
+    img.alt = 'Preview';
+    img.style.cssText='max-height:80px;max-width:100%;object-fit:contain;border-radius:3px;';
+    // Atribut keamanan pada img
+    img.setAttribute('referrerpolicy','no-referrer');
+    img.setAttribute('crossorigin','anonymous');
+    img.onload  = function(){ URL.revokeObjectURL(url); }; // bebaskan memori
+    img.onerror = function(){
+      URL.revokeObjectURL(url);
+      prevEl.innerHTML='<span style="color:#c0392b;font-size:12px">&#9888; Gagal render preview.</span>';
+    };
+    img.src = url;
+    var lbl = document.createElement('div');
+    lbl.textContent='Preview (belum diupload)';
+    lbl.style.cssText='font-size:11px;color:#e67e22;margin-top:4px;font-style:italic;';
+    prevEl.innerHTML='';
+    prevEl.appendChild(img);
+    prevEl.appendChild(lbl);
+  }
+
+  function checkMagic(arr, ext){
+    if(ext==='png')  return arr[0]===0x89&&arr[1]===0x50&&arr[2]===0x4E&&arr[3]===0x47;
+    if(ext==='jpg'||ext==='jpeg') return arr[0]===0xFF&&arr[1]===0xD8&&arr[2]===0xFF;
+    if(ext==='gif')  return arr[0]===0x47&&arr[1]===0x49&&arr[2]===0x46&&arr[3]===0x38;
+    if(ext==='webp') return arr[0]===0x52&&arr[1]===0x49&&arr[2]===0x46&&arr[3]===0x46&&
+                            arr[8]===0x57&&arr[9]===0x45&&arr[10]===0x42&&arr[11]===0x50;
+    if(ext==='bmp')  return arr[0]===0x42&&arr[1]===0x4D;
+    if(ext==='ico')  return arr[0]===0x00&&arr[1]===0x00&&arr[2]===0x01&&arr[3]===0x00;
+    return true; // tipe lain lolos (sudah dihandle server-side)
   }
 
   function loadPrev(prev){
