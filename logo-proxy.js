@@ -645,6 +645,23 @@ const NAV_INJECT = `<script>
     inp.addEventListener('change', function(){
       var f=inp.files[0];
       fname.textContent = f ? f.name+' ('+Math.round(f.size/1024)+' KB)' : 'SVG / PNG / JPG / GIF / WebP — maks 2 MB';
+      // Preview file yang dipilih sebelum upload
+      if(f){
+        var reader = new FileReader();
+        reader.onload = function(e){
+          var img = document.createElement('img');
+          img.src = e.target.result;
+          img.alt = 'Preview';
+          img.style.cssText = 'max-height:80px;max-width:100%;object-fit:contain;border-radius:3px;';
+          var lbl = document.createElement('div');
+          lbl.textContent = 'Preview (belum diupload)';
+          lbl.style.cssText = 'font-size:11px;color:#e67e22;margin-top:4px;font-style:italic;';
+          prev.innerHTML = '';
+          prev.appendChild(img);
+          prev.appendChild(lbl);
+        };
+        reader.readAsDataURL(f);
+      }
     });
     // Drag & drop
     area.addEventListener('dragover',function(e){e.preventDefault();area.style.borderColor='#8a7d50';});
@@ -652,8 +669,21 @@ const NAV_INJECT = `<script>
     area.addEventListener('drop',function(e){
       e.preventDefault(); area.style.borderColor='';
       var f=e.dataTransfer&&e.dataTransfer.files[0];
-      if(f){ try{ var dt=new DataTransfer(); dt.items.add(f); inp.files=dt.files;
-        fname.textContent=f.name+' ('+Math.round(f.size/1024)+' KB)'; }catch(ex){} }
+      if(f){ try{ var dt=new DataTransfer(); dt.items.add(f); inp.files=dt.files; }catch(ex){}
+        fname.textContent=f.name+' ('+Math.round(f.size/1024)+' KB)';
+        // Preview via FileReader
+        var reader=new FileReader();
+        reader.onload=function(ev){
+          var img=document.createElement('img');
+          img.src=ev.target.result;
+          img.style.cssText='max-height:80px;max-width:100%;object-fit:contain;border-radius:3px;';
+          var lbl=document.createElement('div');
+          lbl.textContent='Preview (belum diupload)';
+          lbl.style.cssText='font-size:11px;color:#e67e22;margin-top:4px;font-style:italic;';
+          prev.innerHTML=''; prev.appendChild(img); prev.appendChild(lbl);
+        };
+        reader.readAsDataURL(f);
+      }
     });
     area.appendChild(inp); area.appendChild(lbl); area.appendChild(fname);
 
