@@ -115,7 +115,7 @@ install_nodejs_18() {
         if grep -r "node_20\|node/20" /etc/apt/sources.list.d/ &>/dev/null 2>&1; then
             info "NodeSource repo Node 20 sudah ada, skip setup"
         else
-            info "Menambahkan NodeSource repo (Node.js 18)..."
+            info "Menambahkan NodeSource repo (Node.js 20)..."
             # Ubuntu 24.04 butuh pendekatan keyring baru
             if [[ "$OS_CODENAME" == "noble" || "$OS_CODENAME" == "jammy" || "$OS_CODENAME" == "focal" ]]; then
                 # Method baru: manual keyring (berlaku untuk semua Ubuntu)
@@ -164,12 +164,20 @@ NODE_MAJOR=$(node -v 2>/dev/null | grep -oP '\d+' | head -1)
 [[ "${NODE_MAJOR:-0}" -lt 12 ]] && error "Node.js versi terlalu lama: $(node -v). Butuh minimal v12."
 
 # ════════════════════════════════════════════════════════════
-#  INSTALL MONGODB 7.0
-#  (Support Ubuntu 20.04 focal / 22.04 jammy / 24.04 noble)
+#  INSTALL MONGODB
+#  - Ubuntu 20.04 (focal)  → MongoDB 7.0
+#  - Ubuntu 22.04 (jammy)  → MongoDB 7.0
+#  - Ubuntu 24.04 (noble)  → MongoDB 8.0 (7.0 tidak support noble)
 # ════════════════════════════════════════════════════════════
-info "=== MongoDB 7.0 ==="
 
-MONGO_VERSION="7.0"
+# Pilih versi MongoDB sesuai OS
+case "$OS_CODENAME" in
+    noble) MONGO_VERSION="8.0" ;;
+    *)     MONGO_VERSION="7.0" ;;
+esac
+
+info "=== MongoDB ${MONGO_VERSION} ==="
+
 MONGO_GPG_KEY="https://www.mongodb.org/static/pgp/server-${MONGO_VERSION}.asc"
 KEYRING_FILE="/usr/share/keyrings/mongodb-server-${MONGO_VERSION}.gpg"
 REPO_FILE="/etc/apt/sources.list.d/mongodb-org-${MONGO_VERSION}.list"
@@ -177,26 +185,32 @@ REPO_FILE="/etc/apt/sources.list.d/mongodb-org-${MONGO_VERSION}.list"
 install_mongodb() {
     if [[ "$OS_TYPE" == "debian" ]]; then
 
+        # Hapus repo MongoDB versi lain yang mungkin konflik
+        for OLD_VER in 6.0 7.0 8.0; do
+            [[ "$OLD_VER" == "$MONGO_VERSION" ]] && continue
+            rm -f "/etc/apt/sources.list.d/mongodb-org-${OLD_VER}.list" \
+                  "/usr/share/keyrings/mongodb-server-${OLD_VER}.gpg" 2>/dev/null || true
+        done
+
         # Tambah GPG key
         if [[ ! -f "$KEYRING_FILE" ]]; then
             info "Menambahkan MongoDB GPG key..."
             curl -fsSL "$MONGO_GPG_KEY" | gpg --dearmor -o "$KEYRING_FILE"
         fi
 
-        # Tentukan codename yang didukung MongoDB 7.0
+        # Tentukan codename
         MONGO_CODENAME="$OS_CODENAME"
         case "$OS_CODENAME" in
-            focal|jammy|noble) : ;;   # didukung langsung
+            focal|jammy|noble) : ;;
             *)
-                # Fallback ke focal untuk codename tidak dikenal
-                warn "Codename '$OS_CODENAME' tidak dikenal untuk MongoDB, pakai 'focal'"
-                MONGO_CODENAME="focal"
+                warn "Codename '$OS_CODENAME' tidak dikenal untuk MongoDB, pakai 'jammy'"
+                MONGO_CODENAME="jammy"
                 ;;
         esac
 
         # Tambah repo
         if [[ ! -f "$REPO_FILE" ]]; then
-            info "Menambahkan MongoDB $MONGO_VERSION repo ($MONGO_CODENAME)..."
+            info "Menambahkan MongoDB ${MONGO_VERSION} repo ($MONGO_CODENAME)..."
             echo "deb [ arch=amd64,arm64 signed-by=${KEYRING_FILE} ] \
 https://repo.mongodb.org/apt/ubuntu ${MONGO_CODENAME}/mongodb-org/${MONGO_VERSION} multiverse" \
                 > "$REPO_FILE"
@@ -220,8 +234,16 @@ EOF
 }
 
 if command -v mongod &>/dev/null; then
-    MONGO_VER=$(mongod --version 2>&1 | grep -oP 'v\d+\.\d+' | head -1 || echo "?")
-    success "MongoDB sudah ada: $MONGO_VER"
+    MONGO_VER=$(mongod --version 2>&1 | grep -oP '\d+\.\d+' | head -1 || echo "0")
+    MONGO_MAJOR=$(echo "$MONGO_VER" | cut -d. -f1)
+    MONGO_NEED=$(echo "$MONGO_VERSION" | cut -d. -f1)
+    if [[ "${MONGO_MAJOR:-0}" -ge "${MONGO_NEED:-7}" ]]; then
+        success "MongoDB sudah ada: v$MONGO_VER (✓ kompatibel)"
+    else
+        warn "MongoDB v$MONGO_VER < v${MONGO_VERSION} — upgrade..."
+        install_mongodb
+        success "MongoDB diupgrade ke $(mongod --version 2>&1 | head -1)"
+    fi
 else
     install_mongodb
     success "MongoDB $(mongod --version 2>&1 | head -1) terinstall"
