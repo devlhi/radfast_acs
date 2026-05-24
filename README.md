@@ -114,14 +114,20 @@ genieacs-alice-ui.service
 
 ---
 
-## Port (Auto-Increment Jika Sudah Dipakai)
+## Port & Fungsi Tiap Service
 
-| Service | Port Mulai |
-|---------|------------|
-| UI      | 3001, 3002, 3003... |
-| CWMP    | 7548, 7549, 7550... |
-| NBI     | 7558, 7559, 7560... |
-| FS      | 7568, 7569, 7570... |
+| Service | Port Mulai | Fungsi |
+|---------|------------|--------|
+| **UI**   | 3001, 3002... | Dashboard web — login, kelola device, lihat status |
+| **CWMP** | 7548, 7549... | Port untuk device/CPE TR-069 (ONU, router) daftar & kirim data |
+| **NBI**  | 7558, 7559... | Northbound Interface — REST API untuk integrasi sistem lain (billing, monitoring, automation) |
+| **FS**   | 7568, 7569... | File Server — tempat device download firmware, config, atau script |
+
+> **Singkatnya:**
+> - **UI** = buka di browser, buat operator/admin
+> - **CWMP** = arahkan TR-069 device ke port ini
+> - **NBI** = pakai untuk hit API dari aplikasi lain
+> - **FS** = otomatis dipakai GenieACS saat push firmware/file ke device
 
 ---
 

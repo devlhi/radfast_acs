@@ -39,11 +39,11 @@ while IFS= read -r line; do
 
     echo ""
     echo -e "  ${BOLD}[$COUNT] ${CYAN}$NAME${NC}  ${DIM}(dibuat: $DATE)${NC}"
-    echo -e "  ├─ UI      : ${GREEN}http://$IP:$UI${NC}"
-    echo -e "  ├─ CWMP    : $IP:$CWMP"
-    echo -e "  ├─ NBI     : $IP:$NBI"
-    echo -e "  ├─ FS      : $IP:$FS"
-    echo -e "  ├─ Database: $DB"
+    echo -e "  ├─ UI   Dashboard Web      : ${GREEN}http://$IP:$UI${NC}"
+    echo -e "  ├─ CWMP Port device TR-069 : $IP:$CWMP"
+    echo -e "  ├─ NBI  REST API           : $IP:$NBI"
+    echo -e "  ├─ FS   File Server        : $IP:$FS"
+    echo -e "  ├─ Database                : $DB"
 
     # Cek status services
     STATUS_LINE=""
