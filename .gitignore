@@ -1,0 +1,48 @@
+# ── Node modules (jangan masuk git, di-install otomatis saat setup) ──
+node_modules/
+**/node_modules/
+
+# ── Source asli (obfuscated, private) ────────────────────────
+source/
+
+# ── File development/debug (tidak dibutuhkan di VPS) ─────────
+build_decode_table.js
+patch_bson.js
+syntax_check.js
+verify_deob.js
+pack.sh
+install.sh
+virtualParameters_raw.txt
+virtualParameters_deob.txt
+debug_*.js
+debug_out.txt
+check_*.js
+test_*.js
+deob.py
+test_deob.py
+show_section.js
+show_vp.js
+
+# ── File Windows only ─────────────────────────────────────────
+*.bat
+*.url
+*.exe
+0.Baca-Ini-README.txt
+1.Mongodb-Download.url
+2.NodeJS-Download.url
+3.Install-ACS.bat
+3.Install-ACS.txt
+
+# ── Backup & output ───────────────────────────────────────────
+*.tar.gz
+*.tgz
+*.bak-*
+bin.bak-*/
+public.bak-*/
+*.bak
+
+# ── Misc ──────────────────────────────────────────────────────
+*.tmp
+.DS_Store
+Thumbs.db
+source-deob/genieacs-app/.env
