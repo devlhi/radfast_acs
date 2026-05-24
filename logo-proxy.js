@@ -571,8 +571,9 @@ const NAV_INJECT = `<script>
         'font-size:13px;display:none;}',
         '#rf-msg.ok{background:#dff0d8;color:#2d6a0f;border:1px solid #b8dca0;display:block;}',
         '#rf-msg.er{background:#f2dede;color:#8b1a1a;border:1px solid #e0b0b0;display:block;}',
-        '@keyframes rf-bounce{0%,100%{transform:translateX(0)}50%{transform:translateX(-5px)}}',
-        '#rf-nav-btn .rf-finger{display:inline-block;animation:rf-bounce 0.8s ease-in-out infinite;}'
+        '@keyframes rf-bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}',
+        '#rf-nav-btn{display:inline-flex!important;flex-direction:column;align-items:center;line-height:1.2;}',
+        '#rf-nav-btn .rf-finger{display:block;font-size:16px;animation:rf-bounce 0.7s ease-in-out infinite;}'
       ].join('');
       document.head.appendChild(s);
     }
@@ -725,7 +726,7 @@ const NAV_INJECT = `<script>
     var tag = overviewEl.tagName.toLowerCase();
     var btn = document.createElement(tag);
     btn.id = 'rf-nav-btn';
-    btn.innerHTML = '<span class="rf-finger">&#128072;</span> Chose Logo';
+    btn.innerHTML = '<span class="rf-finger">&#128071;</span>Ganti Logo Klik';
     if(overviewEl.className) btn.className = overviewEl.className;
     if(tag==='a'){ btn.setAttribute('href','javascript:void(0)'); }
     // Tombol merah
