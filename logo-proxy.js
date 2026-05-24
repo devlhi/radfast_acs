@@ -26,7 +26,61 @@ const GENIE_PORT   = parseInt(process.env.RADFAST_UI_INTERNAL      || 13001);
 const LOGO_BASE    = process.env.RADFAST_LOGO_FILE                 || '/tmp/radfast-logo';
 const ADMIN_TOKEN  = process.env.RADFAST_ADMIN_TOKEN               || '';
 const JWT_SECRET   = process.env.GENIEACS_UI_JWT_SECRET            || '';
+const APP_PUBLIC   = process.env.RADFAST_APP_PUBLIC                || '/opt/genieacs-app/public';
 const MAX_SIZE     = 2 * 1024 * 1024; // 2 MB hard limit
+
+// Temukan semua file logo di folder public GenieACS (logo-*.svg dst)
+function findAppLogoFiles() {
+    try {
+        return fs.readdirSync(APP_PUBLIC)
+            .filter(f => /^logo[^/]*\.(svg|png|jpe?g|gif|webp|ico|bmp)$/i.test(f))
+            .map(f => path.join(APP_PUBLIC, f));
+    } catch(_) { return []; }
+}
+
+// Backup logo asli GenieACS (simpan sekali saja)
+function backupOriginalLogos() {
+    for (const f of findAppLogoFiles()) {
+        const bak = f + '.radfast-orig';
+        if (!fs.existsSync(bak)) {
+            try { fs.copyFileSync(f, bak); } catch(_) {}
+        }
+    }
+}
+
+// Terapkan custom logo ke folder public GenieACS
+// Semua file logo-*.svg di public diganti dengan custom logo
+function applyLogoToApp(logoFile) {
+    backupOriginalLogos();
+    const targets = findAppLogoFiles();
+    if (targets.length === 0) {
+        console.warn('[logo] Tidak ada file logo di', APP_PUBLIC);
+        return;
+    }
+    for (const target of targets) {
+        try {
+            fs.copyFileSync(logoFile, target);
+            console.log('[logo] Applied custom logo →', target);
+        } catch(e) {
+            console.error('[logo] Gagal copy ke', target, ':', e.message);
+        }
+    }
+}
+
+// Restore logo asli GenieACS dari backup
+function restoreOriginalLogos() {
+    for (const f of findAppLogoFiles()) {
+        const bak = f + '.radfast-orig';
+        if (fs.existsSync(bak)) {
+            try {
+                fs.copyFileSync(bak, f);
+                console.log('[logo] Restored original →', f);
+            } catch(e) {
+                console.error('[logo] Gagal restore', f, ':', e.message);
+            }
+        }
+    }
+}
 
 // ════════════════════════════════════════════════════════════
 //  RATE LIMITER
@@ -705,6 +759,10 @@ const server = http.createServer((req, res) => {
                 fs.mkdirSync(path.dirname(savePath), { recursive: true });
                 fs.writeFileSync(savePath, finalData, { mode: 0o640 });
 
+                // ── Terapkan langsung ke folder public GenieACS ──
+                // Ini memastikan logo berubah langsung tanpa tergantung proxy intercept
+                applyLogoToApp(savePath);
+
                 recordSuccess(ip);
 
                 sendSecure(res, 200, 'text/html; charset=utf-8',
@@ -748,6 +806,7 @@ const server = http.createServer((req, res) => {
             }
 
             deleteAllLogo();
+            restoreOriginalLogos();
             auditLog('RESET', ip, 'Logo direset ke default');
             sendSecure(res, 200, 'text/html; charset=utf-8',
                 uploadPage('<div class="msg ok">✅ Logo direset ke logo default.</div>', authed));
