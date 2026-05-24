@@ -726,11 +726,14 @@ const NAV_INJECT = `<script>
     btn.textContent = 'Logo';
     if(overviewEl.className) btn.className = overviewEl.className;
     if(tag==='a'){ btn.setAttribute('href','javascript:void(0)'); }
-    btn.style.cursor='pointer';
+    // Tombol merah
+    btn.style.cssText += ';cursor:pointer;background:#c0392b!important;color:#fff!important;'+
+      'border-radius:4px;padding:4px 14px;font-weight:bold;border:none;';
     btn.addEventListener('click',function(e){
       e.preventDefault(); e.stopPropagation(); openModal();
     });
-    overviewEl.parentNode.insertBefore(btn, overviewEl.nextSibling);
+    // Sisipkan SEBELUM Overview (Logo tampil duluan)
+    overviewEl.parentNode.insertBefore(btn, overviewEl);
   }
 
   /* ── Startup ── */
