@@ -1,0 +1,96 @@
+name: Auto Release
+
+# Trigger: setiap push tag v* (contoh: v1.0.0, v1.2.3)
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # wajib untuk buat release
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # ambil semua history untuk changelog
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cek syntax JS & Shell
+        run: |
+          echo "=== Cek logo-proxy.js ==="
+          node --check logo-proxy.js && echo "OK: logo-proxy.js"
+
+          echo "=== Cek shell scripts ==="
+          for f in *.sh; do
+            bash -n "$f" && echo "OK: $f"
+          done
+
+      - name: Ambil versi dari tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog dari git log
+        id: changelog
+        run: |
+          # Ambil tag sebelumnya
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          if [ -n "$PREV_TAG" ]; then
+            LOG=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s" --no-merges)
+          else
+            LOG=$(git log --pretty=format:"- %s" --no-merges | head -20)
+          fi
+
+          # Simpan ke file (hindari masalah multiline di env)
+          echo "$LOG" > /tmp/changelog.txt
+          echo "PREV_TAG=${PREV_TAG}" >> $GITHUB_OUTPUT
+
+      - name: Buat GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          name: "RadFast ACS ${{ steps.version.outputs.VERSION }}"
+          body: |
+            ## RadFast ACS ${{ steps.version.outputs.VERSION }}
+
+            GenieACS v1.2.16 Multi-Instance Manager — by RadFast Bill
+
+            ### ⚡ Install / Update
+
+            ```bash
+            wget -O /tmp/r.sh https://raw.githubusercontent.com/devlhi/radfast_acs/main/get.sh && sudo bash /tmp/r.sh
+            ```
+
+            ### 📋 Perubahan di versi ini
+
+            $(cat /tmp/changelog.txt)
+
+            ---
+
+            ### 🖥️ OS Support
+            | OS | Status |
+            |----|--------|
+            | Ubuntu 20.04 (Focal) | ✅ |
+            | Ubuntu 22.04 (Jammy) | ✅ |
+            | Ubuntu 24.04 (Noble) | ✅ MongoDB 8.0 |
+            | RHEL / CentOS | ✅ |
+
+            ### 📦 Commands
+            ```
+            radfast-add      ← tambah instance/user baru
+            radfast-list     ← lihat semua instance
+            radfast-status   ← monitor resource + status
+            radfast-remove   ← hapus instance
+            ```
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.VERSION, '-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
