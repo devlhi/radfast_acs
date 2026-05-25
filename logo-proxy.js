@@ -859,48 +859,45 @@ const NAV_INJECT = String.raw`<script>
   /* ESC key */
   document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeModal(); });
 
-  /* ── Cek apakah sudah login (ada form password = halaman login) ── */
-  function onLoginPage(){
-    return !!document.querySelector('input[type="password"]');
-  }
-
-  /* ── Inject nav button (hanya saat sudah login) ── */
-  function injectNav(){
-    // Jika di halaman login, hapus tombol jika ada dan jangan inject
-    if(onLoginPage()){
-      var old = document.getElementById('rf-nav-btn');
-      if(old) old.parentNode.removeChild(old);
+  /* ── Inject / hapus nav button sesuai halaman ── */
+  function syncBtn(){
+    var onLogin = !!document.querySelector('input[type="password"]');
+    var btn = document.getElementById('rf-nav-btn');
+    if(onLogin){
+      // Halaman login — sembunyikan tombol
+      if(btn) btn.style.display = 'none';
       return;
     }
-    if(document.getElementById('rf-nav-btn')) return;
-    var btn = document.createElement('div');
-    btn.id = 'rf-nav-btn';
-    btn.setAttribute('style',
+    // Sudah login — tampilkan tombol
+    if(btn){
+      btn.style.display = '';
+      return;
+    }
+    // Buat tombol baru
+    var b = document.createElement('div');
+    b.id = 'rf-nav-btn';
+    b.setAttribute('style',
       'position:fixed;top:8px;right:12px;z-index:2147483647;' +
       'cursor:pointer;background:#c0392b;color:#fff;' +
       'border-radius:5px;padding:6px 14px;font-weight:bold;font-size:13px;' +
       'font-family:Arial,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.4);' +
-      'user-select:none;line-height:1.5;border:none;outline:none;'
+      'user-select:none;line-height:1.5;'
     );
-    btn.textContent = '🖼 Ganti Logo';
-    btn.addEventListener('click', function(e){
+    b.textContent = '🖼 Ganti Logo';
+    b.addEventListener('click', function(e){
       e.preventDefault(); e.stopPropagation(); openModal();
     });
-    // Append ke <html> (documentElement), bukan <body>
-    // Mithril hanya manages document.body, jadi tombol ini aman dari re-render Mithril
-    document.documentElement.appendChild(btn);
+    document.documentElement.appendChild(b);
   }
 
   /* ── Startup ── */
-  // MutationObserver: pantau perubahan DOM — inject/hapus tombol sesuai halaman aktif
-  var obs = new MutationObserver(function(){ injectNav(); });
-  obs.observe(document.documentElement,{childList:true,subtree:true});
-  // Cek awal setelah semua resource selesai (Mithril sudah render)
-  if(document.readyState === 'complete'){
-    injectNav();
-  } else {
-    window.addEventListener('load', injectNav);
-  }
+  // Gunakan window.load agar Mithril sudah selesai render sebelum kita inject.
+  // hashchange menangani navigasi antar halaman (login ↔ dashboard).
+  // Tidak pakai MutationObserver agar tidak mengganggu Mithril.
+  window.addEventListener('load', function(){
+    syncBtn();
+    window.addEventListener('hashchange', syncBtn);
+  });
 
   // Handle direct URL /__admin/logo
   if(location.pathname==='/__admin/logo'){
