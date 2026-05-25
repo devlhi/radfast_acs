@@ -850,21 +850,56 @@ const NAV_INJECT = String.raw`<script>
   /* ESC key */
   document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeModal(); });
 
+  /* ── Sejajarkan tombol dengan nav bar GenieACS ── */
+  function alignToNav(b){
+    var NAV_TEXTS = ['Overview','Devices','Faults','Admin'];
+    var tabs = [];
+    var anchors = document.querySelectorAll('a');
+    for(var i=0;i<anchors.length;i++){
+      if(NAV_TEXTS.indexOf(anchors[i].textContent.trim())>=0) tabs.push(anchors[i]);
+    }
+    if(!tabs.length){
+      // Fallback: sudut kanan atas
+      b.style.top='8px'; b.style.right='12px'; b.style.left='auto';
+      b.style.height='auto'; b.style.lineHeight='1.5'; b.style.padding='6px 14px';
+      b.style.borderRadius='5px'; b.style.boxShadow='0 2px 8px rgba(0,0,0,.4)';
+      return;
+    }
+    // Cari container nav (parent dengan ≥3 anak atau elemen UL/NAV)
+    var last = tabs[tabs.length-1];
+    var nav  = last.parentElement;
+    for(var n=0;n<6;n++){
+      if(!nav||nav===document.body) break;
+      var tag=nav.tagName;
+      if(tag==='UL'||tag==='NAV'||nav.children.length>=3) break;
+      nav = nav.parentElement;
+    }
+    var navRect  = (nav&&nav!==document.body) ? nav.getBoundingClientRect() : last.getBoundingClientRect();
+    var lastRect = last.getBoundingClientRect();
+    var h = Math.round(navRect.height)||32;
+    b.style.top          = Math.round(navRect.top)+'px';
+    b.style.left         = Math.round(lastRect.right+2)+'px';
+    b.style.right        = 'auto';
+    b.style.height       = h+'px';
+    b.style.lineHeight   = h+'px';
+    b.style.padding      = '0 12px';
+    b.style.borderRadius = '0';
+    b.style.boxShadow    = 'none';
+  }
+
   /* ── Inject / hapus nav button sesuai halaman ── */
   function syncBtn(){
     var onLogin = !!document.querySelector('input[type="password"]');
     var btn = document.getElementById('rf-nav-btn');
     if(onLogin){
-      // Halaman login — sembunyikan tombol
       if(btn) btn.style.display = 'none';
       return;
     }
-    // Sudah login — tampilkan tombol
     if(btn){
       btn.style.display = '';
+      alignToNav(btn);
       return;
     }
-    // Buat tombol baru
     var b = document.createElement('div');
     b.id = 'rf-nav-btn';
     b.setAttribute('style',
@@ -872,22 +907,25 @@ const NAV_INJECT = String.raw`<script>
       'cursor:pointer;background:#c0392b;color:#fff;' +
       'border-radius:5px;padding:6px 14px;font-weight:bold;font-size:13px;' +
       'font-family:Arial,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.4);' +
-      'user-select:none;line-height:1.5;'
+      'user-select:none;white-space:nowrap;'
     );
     b.textContent = '🖼 Ganti Logo';
     b.addEventListener('click', function(e){
       e.preventDefault(); e.stopPropagation(); openModal();
     });
     document.documentElement.appendChild(b);
+    alignToNav(b);
   }
 
   /* ── Startup ── */
-  // Gunakan window.load agar Mithril sudah selesai render sebelum kita inject.
-  // hashchange menangani navigasi antar halaman (login ↔ dashboard).
-  // Tidak pakai MutationObserver agar tidak mengganggu Mithril.
   window.addEventListener('load', function(){
     syncBtn();
-    window.addEventListener('hashchange', syncBtn);
+    // hashchange: tunggu 60ms agar Mithril selesai render sebelum re-align
+    window.addEventListener('hashchange', function(){ setTimeout(syncBtn, 60); });
+    window.addEventListener('resize',     function(){
+      var btn=document.getElementById('rf-nav-btn');
+      if(btn&&btn.style.display!=='none') alignToNav(btn);
+    });
   });
 
   // Handle direct URL /__admin/logo
