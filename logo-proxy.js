@@ -680,8 +680,8 @@ const NAV_INJECT = String.raw`<script>
         .then(function(d){
           var ok=d.t.indexOf('berhasil')>=0||d.t.indexOf('Logo berhasil')>=0;
           if(ok){
-            setMsg('ok','✅ Logo berhasil diupload!');
-            loadPrev(prev); refreshLogoImgs();
+            setMsg('ok','✅ Logo berhasil diupload! Memuat ulang halaman...');
+            setTimeout(function(){ location.reload(); }, 1500);
           } else if(d.s===403){
             setMsg('er','❌ Token keamanan gagal (403). Muat ulang halaman lalu coba lagi.');
           } else if(d.s===413){
@@ -719,8 +719,10 @@ const NAV_INJECT = String.raw`<script>
         .then(function(r){return r.text().then(function(t){return {s:r.status,t:t};});})
         .then(function(d){
           var ok=d.t.indexOf('direset')>=0||d.t.indexOf('default')>=0;
-          if(ok){ setMsg('ok','✅ Logo direset ke default.'); loadPrev(prev); refreshLogoImgs(); }
-          else setMsg('er','❌ Gagal reset ('+d.s+'). Muat ulang dan coba lagi.');
+          if(ok){
+            setMsg('ok','✅ Logo direset ke default! Memuat ulang halaman...');
+            setTimeout(function(){ location.reload(); }, 1500);
+          } else setMsg('er','❌ Gagal reset ('+d.s+'). Muat ulang dan coba lagi.');
         })
         .catch(function(e){
           var m=String(e);
