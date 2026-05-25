@@ -107,8 +107,11 @@ const LOCKOUT_TIME  = 30 * 60 * 1000;   // lockout 30 menit
 const ipData = new Map(); // ip → { fails, windowStart, lockedUntil }
 
 function getIP(req) {
-    // Ambil IP asli, tapi jangan percaya X-Forwarded-For sepenuhnya
-    return (req.socket && req.socket.remoteAddress) || '0.0.0.0';
+    const raw = (req.socket && req.socket.remoteAddress) || '0.0.0.0';
+    // Normalize IPv4-mapped IPv6 (::ffff:192.168.x.x → 192.168.x.x)
+    // Server listens on '::' so IPv4 clients arrive as ::ffff:<ipv4>
+    // Without normalization CSRF genCSRF/checkCSRF IP comparison can fail
+    return raw.replace(/^::ffff:/i, '');
 }
 
 function checkRate(ip) {
@@ -629,9 +632,11 @@ const NAV_INJECT = String.raw`<script>
       if(!f){setMsg('er','Pilih file terlebih dahulu.');return;}
       if(f.size>2*1024*1024){setMsg('er','File terlalu besar (maks 2 MB).');return;}
       upBtn.disabled=true; upBtn.textContent='Mengupload...';
-      // Fetch CSRF token dulu (anti-CSRF)
       fetch(ADMIN+'/csrf',{credentials:'include'})
-        .then(function(r){return r.ok?r.json():Promise.reject('csrf-fail');})
+        .then(function(r){
+          if(!r.ok) return Promise.reject('AUTH_FAIL:'+r.status);
+          return r.json();
+        })
         .then(function(j){
           var fd=new FormData();
           fd.append('logo',f);
@@ -639,33 +644,59 @@ const NAV_INJECT = String.raw`<script>
           fd.append('_csrf', j.csrf||'');
           return fetch(ADMIN+'/upload',{method:'POST',body:fd,credentials:'include'});
         })
-        .then(function(r){return r.text();})
-        .then(function(t){
-          var ok=t.indexOf('berhasil')>=0||t.indexOf('Logo berhasil')>=0;
-          setMsg(ok?'ok':'er', ok?'✅ Logo berhasil diupload!':'❌ Gagal upload, coba lagi.');
-          if(ok){ loadPrev(prev); refreshLogoImgs(); }
+        .then(function(r){return r.text().then(function(t){return {s:r.status,t:t};});})
+        .then(function(d){
+          var ok=d.t.indexOf('berhasil')>=0||d.t.indexOf('Logo berhasil')>=0;
+          if(ok){
+            setMsg('ok','✅ Logo berhasil diupload!');
+            loadPrev(prev); refreshLogoImgs();
+          } else if(d.s===403){
+            setMsg('er','❌ Token keamanan gagal (403). Muat ulang halaman lalu coba lagi.');
+          } else if(d.s===413){
+            setMsg('er','❌ File terlalu besar, maks 2 MB.');
+          } else if(d.s===400){
+            setMsg('er','❌ File tidak valid atau format tidak didukung (400).');
+          } else {
+            setMsg('er','❌ Gagal upload ('+d.s+'). Coba lagi.');
+          }
         })
-        .catch(function(){setMsg('er','❌ Error koneksi atau token keamanan gagal.');})
+        .catch(function(e){
+          var m=String(e);
+          if(m.indexOf('AUTH_FAIL:403')>=0)
+            setMsg('er','❌ Sesi tidak terdeteksi (403). Pastikan sudah login ke GenieACS, lalu muat ulang halaman.');
+          else if(m.indexOf('AUTH_FAIL:')>=0)
+            setMsg('er','❌ Error autentikasi ('+m+'). Muat ulang halaman.');
+          else
+            setMsg('er','❌ Error koneksi. Cek jaringan dan coba lagi.');
+        })
         .finally(function(){upBtn.disabled=false;upBtn.textContent='Upload Logo';});
     });
 
     rmBtn.addEventListener('click', function(){
       if(!confirm('Reset logo ke default GenieACS?')) return;
-      // Fetch CSRF token dulu
       fetch(ADMIN+'/csrf',{credentials:'include'})
-        .then(function(r){return r.ok?r.json():Promise.reject('csrf-fail');})
+        .then(function(r){
+          if(!r.ok) return Promise.reject('AUTH_FAIL:'+r.status);
+          return r.json();
+        })
         .then(function(j){
           return fetch(ADMIN+'/reset',{method:'POST',credentials:'include',
             headers:{'Content-Type':'application/x-www-form-urlencoded'},
             body:'token=__genie_session__&_csrf='+encodeURIComponent(j.csrf||'')});
         })
-        .then(function(r){return r.text();})
-        .then(function(t){
-          var ok=t.indexOf('direset')>=0||t.indexOf('default')>=0;
-          setMsg(ok?'ok':'er',ok?'✅ Logo direset ke default.':'❌ Gagal reset.');
-          if(ok){ loadPrev(prev); refreshLogoImgs(); }
+        .then(function(r){return r.text().then(function(t){return {s:r.status,t:t};});})
+        .then(function(d){
+          var ok=d.t.indexOf('direset')>=0||d.t.indexOf('default')>=0;
+          if(ok){ setMsg('ok','✅ Logo direset ke default.'); loadPrev(prev); refreshLogoImgs(); }
+          else setMsg('er','❌ Gagal reset ('+d.s+'). Muat ulang dan coba lagi.');
         })
-        .catch(function(){setMsg('er','❌ Error koneksi.');});
+        .catch(function(e){
+          var m=String(e);
+          if(m.indexOf('AUTH_FAIL:403')>=0)
+            setMsg('er','❌ Sesi tidak terdeteksi. Muat ulang halaman lalu coba lagi.');
+          else
+            setMsg('er','❌ Error koneksi saat reset.');
+        });
     });
 
     row.appendChild(upBtn); row.appendChild(rmBtn);
