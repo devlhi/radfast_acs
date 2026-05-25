@@ -1048,22 +1048,40 @@ const COOKIE_WRAPPER = String.raw`<script>
 </script>`;
 
 // Script ganti logo GenieACS via DOM (tidak bergantung pada URL /public/)
-// GenieACS bisa inline logo di JS bundle (data URI / webpack) — HTTP intercept tidak cukup
-// Solusi: cari img di header, replace src-nya, pakai MutationObserver agar Mithril tidak reset
+// GenieACS inline logo di JS bundle (webpack data URI) — HTTP intercept tidak bisa.
+// Solusi: cari img di header, replace src + ukuran, MutationObserver cegah Mithril reset.
 function buildLogoReplacerScript(ts) {
     return String.raw`<script>
 (function(){
   'use strict';
   var SRC='/__admin/logo/preview?t=${ts}';
 
+  // Ukur tinggi nav bar (sama seperti alignToNav di atas)
+  function navHeight(){
+    var NAV=['Overview','Devices','Faults','Admin'];
+    var anchors=document.querySelectorAll('a');
+    for(var i=0;i<anchors.length;i++){
+      if(NAV.indexOf(anchors[i].textContent.trim())<0) continue;
+      var el=anchors[i].parentElement;
+      for(var n=0;n<6;n++){
+        if(!el||el===document.body) break;
+        if(el.tagName==='UL'||el.tagName==='NAV'||el.children.length>=3) break;
+        el=el.parentElement;
+      }
+      if(el&&el!==document.body){
+        var h=el.getBoundingClientRect().height;
+        if(h>10) return Math.round(h);
+      }
+    }
+    return 0; // belum render
+  }
+
   function findLogo(){
     var imgs=document.querySelectorAll('img');
-    // Cari img dengan src yang mengandung /public/ (URL-based logo)
     for(var i=0;i<imgs.length;i++){
       var s=imgs[i].getAttribute('src')||'';
       if(s.indexOf('/public/')>=0) return imgs[i];
     }
-    // Fallback: img pertama di halaman = logo GenieACS di header
     if(imgs.length>0) return imgs[0];
     return null;
   }
@@ -1071,43 +1089,45 @@ function buildLogoReplacerScript(ts) {
   function fix(){
     var img=findLogo();
     if(!img) return;
-    // Jangan replace kalau sudah pakai URL kita (cegah loop)
+    // Jangan replace kalau sudah pakai URL kita (cegah loop MutationObserver)
     if((img.getAttribute('src')||'').indexOf('/__admin/logo/')>=0) return;
+
+    var h=navHeight();
+    if(h<10) return; // nav belum render, coba lagi nanti
+
     img.setAttribute('src',SRC);
-    // Paksa reload kalau browser cache lama
-    img.style.visibility='hidden';
-    img.style.visibility='';
+    // Paksa ukuran sesuai nav bar — sama persis seperti logo asli
+    img.style.height=h+'px';
+    img.style.width='auto';
+    img.style.maxWidth='280px';
+    img.style.objectFit='contain';
+    img.style.display='block';
+    img.removeAttribute('width');
+    img.removeAttribute('height');
   }
 
-  // Jalankan setelah Mithril selesai render pertama kali
   fix();
   setTimeout(fix,200); setTimeout(fix,700); setTimeout(fix,2000);
-
-  // Setelah navigasi SPA (hashchange) Mithril re-render — re-apply logo
   window.addEventListener('hashchange',function(){setTimeout(fix,150);});
+  window.addEventListener('load',fix);
 
-  // MutationObserver: tangkap saat Mithril reset img.src
-  var obs=new MutationObserver(function(mutations){
-    for(var i=0;i<mutations.length;i++){
-      var t=mutations[i].target;
-      // Kalau attributenya src dan valuenya bukan logo kita → fix
-      if(mutations[i].type==='attributes'&&t.tagName==='IMG'){
+  // MutationObserver: Mithril reset img.src → kita ganti balik
+  var obs=new MutationObserver(function(muts){
+    for(var i=0;i<muts.length;i++){
+      var t=muts[i].target;
+      if(muts[i].type==='attributes'&&t.tagName==='IMG'){
         var s=t.getAttribute('src')||'';
-        if(s.indexOf('/__admin/logo/')<0&&s.indexOf('/public/')>=0){fix();return;}
+        if(s&&s.indexOf('/__admin/logo/')<0){fix();return;}
       }
     }
-    // childList: Mithril buat node baru
     fix();
   });
   function startObs(){
-    obs.observe(document.body,{
-      childList:true,subtree:true,
-      attributes:true,attributeFilter:['src']
-    });
+    obs.observe(document.body,{childList:true,subtree:true,
+      attributes:true,attributeFilter:['src']});
   }
   if(document.body) startObs();
   else window.addEventListener('DOMContentLoaded',startObs);
-  window.addEventListener('load',fix);
 })();
 </script>`;
 }
