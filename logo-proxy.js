@@ -936,7 +936,60 @@ const NAV_INJECT = String.raw`<script>
 })();
 </script>`;
 
+// ── Cookie isolation wrapper ─────────────────────────────────
+// Diinjeksi di awal <head> SEBELUM app.js agar aktif sebelum Mithril baca cookie.
+// Teknik: walk prototype chain cari descriptor, lalu Object.defineProperty
+// di document instance (bukan prototype) — ini yang benar & aman.
+// Bug lama: cek `!d.configurable` terlalu ketat (undefined → early return).
+// Fix: hapus cek itu, pakai try-catch saja.
+const COOKIE_WRAPPER = String.raw`<script>
+(function(){
+  'use strict';
+  var PFX='_p${PUBLIC_PORT}_';
+  // Cari cookie descriptor dengan walk prototype chain
+  var d=null, proto=document;
+  while((proto=Object.getPrototypeOf(proto))){
+    d=Object.getOwnPropertyDescriptor(proto,'cookie');
+    if(d&&d.get&&d.set)break;
+    d=null;
+  }
+  if(!d)return;
+  var _get=d.get.bind(document);
+  var _set=d.set.bind(document);
+  try{
+    Object.defineProperty(document,'cookie',{
+      configurable:true,
+      enumerable:true,
+      get:function(){
+        return _get().split(';').map(function(c){
+          var t=c.trim();
+          if(!t)return null;
+          if(t.slice(0,PFX.length)===PFX)return t.slice(PFX.length);
+          if(/^_p\d+_/.test(t))return null;
+          return c;
+        }).filter(function(x){return x!==null&&x!=='';}).join('; ');
+      },
+      set:function(v){
+        if(!v)return;
+        var eq=v.indexOf('=');
+        if(eq<0){_set(v);return;}
+        var n=v.slice(0,eq).trim();
+        if(/^_p\d+_/.test(n)||n==='_rfcsrf'){_set(v);return;}
+        _set(PFX+n+v.slice(eq));
+      }
+    });
+  }catch(e){}
+})();
+</script>`;
+
 function injectNavLink(html) {
+    // COOKIE_WRAPPER wajib jalan SEBELUM app.js → inject di awal <head>
+    var headTag = html.match(/<head[^>]*>/i);
+    if (headTag) {
+        html = html.replace(headTag[0], headTag[0] + COOKIE_WRAPPER);
+    } else if (html.includes('</head>')) {
+        html = html.replace('</head>', COOKIE_WRAPPER + '</head>');
+    }
     if (html.includes('</body>')) {
         return html.replace('</body>', NAV_INJECT + '</body>');
     }
@@ -955,6 +1008,8 @@ function proxyRequest(req, res) {
     // Hapus Accept-Encoding agar GenieACS kirim HTML plain (bukan gzip)
     const headers = { ...req.headers, host: `127.0.0.1:${GENIE_PORT}` };
     delete headers['accept-encoding'];
+    // Strip prefix sebelum diteruskan ke GenieACS
+    if (headers.cookie) headers.cookie = rewriteCookieForUpstream(headers.cookie);
 
     const opts = {
         hostname : '127.0.0.1',
@@ -968,6 +1023,12 @@ function proxyRequest(req, res) {
         const ct = (pRes.headers['content-type'] || '');
 
         const respHeaders = { ...pRes.headers };
+        // Prefix Set-Cookie dari GenieACS agar tiap instance punya cookie berbeda
+        if (respHeaders['set-cookie']) {
+            const sc = respHeaders['set-cookie'];
+            respHeaders['set-cookie'] = Array.isArray(sc)
+                ? sc.map(rewriteSetCookie) : [rewriteSetCookie(sc)];
+        }
 
         // Inject tombol hanya ke halaman HTML
         if (ct.includes('text/html')) {
