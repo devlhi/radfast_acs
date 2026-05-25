@@ -859,8 +859,19 @@ const NAV_INJECT = String.raw`<script>
   /* ESC key */
   document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeModal(); });
 
-  /* ── Inject nav button ── */
+  /* ── Cek apakah sudah login (ada form password = halaman login) ── */
+  function onLoginPage(){
+    return !!document.querySelector('input[type="password"]');
+  }
+
+  /* ── Inject nav button (hanya saat sudah login) ── */
   function injectNav(){
+    // Jika di halaman login, hapus tombol jika ada dan jangan inject
+    if(onLoginPage()){
+      var old = document.getElementById('rf-nav-btn');
+      if(old) old.parentNode.removeChild(old);
+      return;
+    }
     if(document.getElementById('rf-nav-btn')) return;
     var btn = document.createElement('div');
     btn.id = 'rf-nav-btn';
@@ -881,15 +892,15 @@ const NAV_INJECT = String.raw`<script>
   }
 
   /* ── Startup ── */
-  // Inject segera — script ini di-inject sebelum </body>, DOM sudah ada
-  // Tidak perlu tunggu window.load karena kita append ke documentElement (bukan body)
-  injectNav();
-
-  // MutationObserver sebagai backup — re-inject jika browser memindahkan elemen
-  var obs = new MutationObserver(function(){
-    if(!document.getElementById('rf-nav-btn')) injectNav();
-  });
+  // MutationObserver: pantau perubahan DOM — inject/hapus tombol sesuai halaman aktif
+  var obs = new MutationObserver(function(){ injectNav(); });
   obs.observe(document.documentElement,{childList:true,subtree:true});
+  // Cek awal setelah semua resource selesai (Mithril sudah render)
+  if(document.readyState === 'complete'){
+    injectNav();
+  } else {
+    window.addEventListener('load', injectNav);
+  }
 
   // Handle direct URL /__admin/logo
   if(location.pathname==='/__admin/logo'){
