@@ -210,17 +210,11 @@ function isGenieSession(req) {
     const bear = auth.match(/^Bearer\s+(\S+)/i);
     if (bear && verifyGenieJWT(bear[1])) return true;
 
-    // Cek cookie — browser mengirim session_<PORT> (sudah di-rename oleh proxy response)
-    // Cek session_<PORT> dulu, lalu fallback ke "session" (request langsung ke GenieACS)
+    // Cek semua cookie — coba setiap nilai sebagai JWT
+    // (tidak bergantung pada nama cookie, kompatibel dengan semua versi GenieACS)
     const cookieStr = req.headers['cookie'] || '';
     for (const part of cookieStr.split(';')) {
-        const t = part.trim();
-        const eqIdx = t.indexOf('=');
-        if (eqIdx < 0) continue;
-        const name = t.slice(0, eqIdx).trim();
-        const val  = t.slice(eqIdx + 1);
-        // Hanya cek cookie milik instance ini (session_<PORT>) atau "session" (upstream)
-        if (name !== SESSION_COOKIE && name !== 'session') continue;
+        const val = part.trim().split('=').slice(1).join('=');
         try {
             if (val && verifyGenieJWT(decodeURIComponent(val))) return true;
         } catch(_) {}
@@ -855,35 +849,28 @@ const NAV_INJECT = `<script>
 
   /* ── Inject nav button ── */
   function injectNav(){
-    // Gunakan fixed button di body — tidak bisa dihapus oleh Mithril vDOM
-    // karena di luar container yang dikelola Mithril
     if(document.getElementById('rf-nav-btn')) return;
-    if(!document.body) return;
 
     var btn = document.createElement('div');
     btn.id = 'rf-nav-btn';
-    btn.innerHTML = '<span class="rf-finger">&#128071;</span> Ganti Logo';
-    btn.style.cssText = [
-      'position:fixed',
-      'top:6px',
-      'right:14px',
-      'z-index:2147483646',
-      'cursor:pointer',
-      'background:#c0392b',
-      'color:#fff',
-      'border-radius:4px',
-      'padding:5px 14px',
-      'font-weight:bold',
-      'font-size:13px',
-      'font-family:Arial,sans-serif',
-      'box-shadow:0 2px 8px rgba(0,0,0,.35)',
-      'user-select:none',
-      'line-height:1.4'
-    ].join(';');
+    btn.setAttribute('style',
+      'position:fixed!important;top:6px!important;right:14px!important;' +
+      'z-index:2147483647!important;cursor:pointer!important;' +
+      'background:#c0392b!important;color:#fff!important;' +
+      'border-radius:4px!important;padding:5px 14px!important;' +
+      'font-weight:bold!important;font-size:13px!important;' +
+      'font-family:Arial,sans-serif!important;' +
+      'box-shadow:0 2px 8px rgba(0,0,0,.4)!important;' +
+      'user-select:none!important;line-height:1.6!important;' +
+      'display:block!important;visibility:visible!important;opacity:1!important;'
+    );
+    btn.textContent = '🖼 Ganti Logo';
     btn.addEventListener('click', function(e){
       e.preventDefault(); e.stopPropagation(); openModal();
     });
-    document.body.appendChild(btn);
+    // Append ke <html> bukan <body> — Mithril hanya kelola <body>,
+    // elemen di luar body tidak akan dihapus oleh vDOM Mithril
+    document.documentElement.appendChild(btn);
   }
 
   /* ── Startup ── */
