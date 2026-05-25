@@ -927,11 +927,6 @@ function proxyRequest(req, res) {
     const headers = { ...req.headers, host: `127.0.0.1:${GENIE_PORT}` };
     delete headers['accept-encoding'];
 
-    // Isolasi cookie: rename session_<PORT> → session sebelum dikirim ke GenieACS
-    if (headers.cookie) {
-        headers.cookie = rewriteCookieForUpstream(headers.cookie);
-    }
-
     const opts = {
         hostname : '127.0.0.1',
         port     : GENIE_PORT,
@@ -943,14 +938,7 @@ function proxyRequest(req, res) {
     const proxy = http.request(opts, (pRes) => {
         const ct = (pRes.headers['content-type'] || '');
 
-        // Isolasi cookie: rename session → session_<PORT> di response
         const respHeaders = { ...pRes.headers };
-        if (respHeaders['set-cookie']) {
-            const sc = respHeaders['set-cookie'];
-            respHeaders['set-cookie'] = Array.isArray(sc)
-                ? sc.map(rewriteSetCookie)
-                : [rewriteSetCookie(sc)];
-        }
 
         // Inject tombol hanya ke halaman HTML
         if (ct.includes('text/html')) {
