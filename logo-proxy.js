@@ -28,30 +28,44 @@ const ADMIN_TOKEN  = process.env.RADFAST_ADMIN_TOKEN               || '';
 const JWT_SECRET   = process.env.GENIEACS_UI_JWT_SECRET            || '';
 const MAX_SIZE     = 2 * 1024 * 1024; // 2 MB hard limit
 
-// Cookie isolation: tiap instance pakai nama cookie berbeda
-// session → session_3001, session_3004, dst.
-// Mencegah logout silang antar-instance (semua di IP yang sama)
-const SESSION_COOKIE = `session_${PUBLIC_PORT}`;
+// Cookie isolation: prefix semua cookie JWT dengan _p<PORT>_
+// Supaya tiap instance punya cookie terpisah di browser (tidak saling overwrite)
+// Strategi: deteksi JWT dari VALUE (3 bagian base64url), bukan nama cookie
+// Ini robust untuk semua nama cookie GenieACS (session, koa:sess, dll)
+const PORT_PREFIX = `_p${PUBLIC_PORT}_`;
+const JWT_PATTERN = /^[\w-]+\.[\w-]{10,}\.[\w-]+$/; // deteksi JWT: xxx.xxx.xxx
 
-// Ganti nama cookie "session" → "session_<PORT>" di response dari GenieACS
-// agar browser simpan cookie terpisah per instance
+// Response dari GenieACS: prefix cookie yang isinya JWT
 function rewriteSetCookie(val) {
-    // val contoh: "session=eyJ...; Path=/; HttpOnly; SameSite=Strict"
-    return val.replace(/^session(\s*=)/i, `${SESSION_COOKIE}$1`);
+    // Format Set-Cookie: name=value; Path=/; ...
+    const eqIdx = val.indexOf('=');
+    if (eqIdx < 0) return val;
+    const name    = val.slice(0, eqIdx).trim();
+    const rest    = val.slice(eqIdx + 1); // "value; Path=/; ..."
+    const semIdx  = rest.indexOf(';');
+    const cookVal = semIdx >= 0 ? rest.slice(0, semIdx) : rest;
+    const attrs   = semIdx >= 0 ? rest.slice(semIdx) : '';
+
+    // Skip cookie milik proxy sendiri
+    if (name.startsWith('_p') || name === '_rfcsrf') return val;
+    // Hanya prefix cookie yang valuenya JWT
+    if (JWT_PATTERN.test(cookVal.trim())) {
+        return `${PORT_PREFIX}${name}=${cookVal}${attrs}`;
+    }
+    return val;
 }
 
-// Ganti nama cookie "session_<PORT>" → "session" di request ke GenieACS
-// agar GenieACS bisa baca cookie-nya
+// Request ke GenieACS: kembalikan nama cookie asli, buang milik instance lain
 function rewriteCookieForUpstream(cookieStr) {
     if (!cookieStr) return cookieStr;
     return cookieStr.split(';').map(c => {
         const t = c.trimStart();
-        // Buang cookie session milik instance lain (session_XXXX bukan milik kita)
-        if (/^session_\d+\s*=/i.test(t) && !t.startsWith(SESSION_COOKIE + '=') && !t.startsWith(SESSION_COOKIE + ' =')) return null;
-        // Rename milik kita ke "session"
-        if (t.startsWith(SESSION_COOKIE + '=') || t.startsWith(SESSION_COOKIE + ' =')) {
-            return c.replace(new RegExp('^(\\s*)' + SESSION_COOKIE + '(\\s*=)'), '$1session$2');
+        // Cookie milik instance ini → hapus prefix
+        if (t.startsWith(PORT_PREFIX)) {
+            return c.replace(PORT_PREFIX, '');
         }
+        // Cookie milik instance lain → buang
+        if (/^_p\d+_/.test(t)) return null;
         return c;
     }).filter(v => v !== null).join(';');
 }
@@ -850,41 +864,45 @@ const NAV_INJECT = `<script>
   /* ── Inject nav button ── */
   function injectNav(){
     if(document.getElementById('rf-nav-btn')) return;
+    if(!document.body) return;
 
     var btn = document.createElement('div');
     btn.id = 'rf-nav-btn';
+    // Gunakan setAttribute style agar tidak bisa di-override GenieACS CSS
     btn.setAttribute('style',
-      'position:fixed!important;top:6px!important;right:14px!important;' +
-      'z-index:2147483647!important;cursor:pointer!important;' +
-      'background:#c0392b!important;color:#fff!important;' +
-      'border-radius:4px!important;padding:5px 14px!important;' +
-      'font-weight:bold!important;font-size:13px!important;' +
-      'font-family:Arial,sans-serif!important;' +
-      'box-shadow:0 2px 8px rgba(0,0,0,.4)!important;' +
-      'user-select:none!important;line-height:1.6!important;' +
-      'display:block!important;visibility:visible!important;opacity:1!important;'
+      'position:fixed;top:8px;right:12px;z-index:2147483647;' +
+      'cursor:pointer;background:#c0392b;color:#fff;' +
+      'border-radius:5px;padding:6px 14px;font-weight:bold;font-size:13px;' +
+      'font-family:Arial,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.4);' +
+      'user-select:none;line-height:1.5;border:none;outline:none;'
     );
     btn.textContent = '🖼 Ganti Logo';
     btn.addEventListener('click', function(e){
       e.preventDefault(); e.stopPropagation(); openModal();
     });
-    // Append ke <html> bukan <body> — Mithril hanya kelola <body>,
-    // elemen di luar body tidak akan dihapus oleh vDOM Mithril
-    document.documentElement.appendChild(btn);
+    document.body.appendChild(btn);
   }
 
   /* ── Startup ── */
+  // Tunggu window.load (semua JS selesai) lalu inject
+  // Ini memastikan Mithril sudah init sebelum kita append ke body
   function start(){
-    injectNav();
+    // Inject langsung jika body sudah siap
+    if(document.body) injectNav();
+
+    // Watch jika Mithril clear body dan hapus tombol kita
     var obs = new MutationObserver(function(){
       if(!document.getElementById('rf-nav-btn')) injectNav();
     });
     obs.observe(document.documentElement,{childList:true,subtree:true});
   }
 
-  if(document.readyState==='loading'){
-    document.addEventListener('DOMContentLoaded',start);
-  } else { start(); }
+  // window.load = semua resource (termasuk Mithril app.js) sudah selesai
+  if(document.readyState === 'complete'){
+    start();
+  } else {
+    window.addEventListener('load', start);
+  }
 
   // Handle direct URL /__admin/logo
   if(location.pathname==='/__admin/logo'){
