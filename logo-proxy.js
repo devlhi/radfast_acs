@@ -822,15 +822,52 @@ const NAV_INJECT = `<script>
   function injectNav(){
     if(document.getElementById('rf-nav-btn')) return;
 
+    // Cari elemen nav "Overview" — tanpa offsetParent check (tidak reliable
+    // di navbar fixed/table GenieACS). Coba beberapa strategi:
     var overviewEl = null;
-    var all = document.querySelectorAll('a,li,td,th,span');
+
+    // Strategi 1: cari <a> atau <li> atau <td> dengan teks persis "Overview"
+    var all = document.querySelectorAll('a,li,td,th,span,div');
     for(var i=0;i<all.length;i++){
       var el=all[i];
-      if(el.textContent.trim()==='Overview' && el.offsetParent!==null){
+      var txt = el.textContent.trim();
+      if(txt==='Overview' || txt.toLowerCase()==='overview'){
         overviewEl=el; break;
       }
     }
-    if(!overviewEl) return;
+
+    // Strategi 2: cari via href yang mengandung "overview"
+    if(!overviewEl){
+      var links = document.querySelectorAll('a[href]');
+      for(var j=0;j<links.length;j++){
+        if(links[j].getAttribute('href').toLowerCase().indexOf('overview')>=0){
+          overviewEl=links[j]; break;
+        }
+      }
+    }
+
+    // Strategi 3: fallback — sisipkan ke dalam logo/header area
+    if(!overviewEl){
+      var logoImg = document.querySelector('img[src*="logo"]') ||
+                    document.querySelector('header') ||
+                    document.querySelector('nav');
+      if(logoImg){
+        var wrap = logoImg.parentNode || document.body;
+        var floatBtn = document.createElement('div');
+        floatBtn.id = 'rf-nav-btn';
+        floatBtn.innerHTML = '<span class="rf-finger">&#128071;</span>Ganti Logo';
+        floatBtn.style.cssText = 'position:fixed;top:8px;right:12px;z-index:9999;'+
+          'cursor:pointer;background:#c0392b;color:#fff;border-radius:4px;'+
+          'padding:4px 12px;font-weight:bold;font-size:13px;font-family:Arial,sans-serif;'+
+          'box-shadow:0 2px 6px rgba(0,0,0,.3);';
+        floatBtn.addEventListener('click',function(e){
+          e.preventDefault(); e.stopPropagation(); openModal();
+        });
+        document.body.appendChild(floatBtn);
+        return;
+      }
+      return;
+    }
 
     var tag = overviewEl.tagName.toLowerCase();
     var btn = document.createElement(tag);
@@ -838,13 +875,11 @@ const NAV_INJECT = `<script>
     btn.innerHTML = '<span class="rf-finger">&#128071;</span>Ganti Logo Klik';
     if(overviewEl.className) btn.className = overviewEl.className;
     if(tag==='a'){ btn.setAttribute('href','javascript:void(0)'); }
-    // Tombol merah
     btn.style.cssText += ';cursor:pointer;background:#c0392b!important;color:#fff!important;'+
       'border-radius:4px;padding:4px 14px;font-weight:bold;border:none;';
     btn.addEventListener('click',function(e){
       e.preventDefault(); e.stopPropagation(); openModal();
     });
-    // Sisipkan SEBELUM Overview (Logo tampil duluan)
     overviewEl.parentNode.insertBefore(btn, overviewEl);
   }
 
