@@ -28,6 +28,34 @@ const ADMIN_TOKEN  = process.env.RADFAST_ADMIN_TOKEN               || '';
 const JWT_SECRET   = process.env.GENIEACS_UI_JWT_SECRET            || '';
 const MAX_SIZE     = 2 * 1024 * 1024; // 2 MB hard limit
 
+// Cookie isolation: tiap instance pakai nama cookie berbeda
+// session → session_3001, session_3004, dst.
+// Mencegah logout silang antar-instance (semua di IP yang sama)
+const SESSION_COOKIE = `session_${PUBLIC_PORT}`;
+
+// Ganti nama cookie "session" → "session_<PORT>" di response dari GenieACS
+// agar browser simpan cookie terpisah per instance
+function rewriteSetCookie(val) {
+    // val contoh: "session=eyJ...; Path=/; HttpOnly; SameSite=Strict"
+    return val.replace(/^session(\s*=)/i, `${SESSION_COOKIE}$1`);
+}
+
+// Ganti nama cookie "session_<PORT>" → "session" di request ke GenieACS
+// agar GenieACS bisa baca cookie-nya
+function rewriteCookieForUpstream(cookieStr) {
+    if (!cookieStr) return cookieStr;
+    return cookieStr.split(';').map(c => {
+        const t = c.trimStart();
+        // Buang cookie session milik instance lain (session_XXXX bukan milik kita)
+        if (/^session_\d+\s*=/i.test(t) && !t.startsWith(SESSION_COOKIE + '=') && !t.startsWith(SESSION_COOKIE + ' =')) return null;
+        // Rename milik kita ke "session"
+        if (t.startsWith(SESSION_COOKIE + '=') || t.startsWith(SESSION_COOKIE + ' =')) {
+            return c.replace(new RegExp('^(\\s*)' + SESSION_COOKIE + '(\\s*=)'), '$1session$2');
+        }
+        return c;
+    }).filter(v => v !== null).join(';');
+}
+
 // Logo setiap instance disimpan di folder instance masing-masing
 // (LOGO_BASE = /opt/genieacs-instances/<user>/logo/custom-logo)
 // Proxy intercept request logo → serve dari folder instance sendiri
@@ -182,10 +210,17 @@ function isGenieSession(req) {
     const bear = auth.match(/^Bearer\s+(\S+)/i);
     if (bear && verifyGenieJWT(bear[1])) return true;
 
-    // Cek semua cookie — coba tiap nilai sebagai JWT
+    // Cek cookie — browser mengirim session_<PORT> (sudah di-rename oleh proxy response)
+    // Cek session_<PORT> dulu, lalu fallback ke "session" (request langsung ke GenieACS)
     const cookieStr = req.headers['cookie'] || '';
     for (const part of cookieStr.split(';')) {
-        const val = part.trim().split('=').slice(1).join('=');
+        const t = part.trim();
+        const eqIdx = t.indexOf('=');
+        if (eqIdx < 0) continue;
+        const name = t.slice(0, eqIdx).trim();
+        const val  = t.slice(eqIdx + 1);
+        // Hanya cek cookie milik instance ini (session_<PORT>) atau "session" (upstream)
+        if (name !== SESSION_COOKIE && name !== 'session') continue;
         try {
             if (val && verifyGenieJWT(decodeURIComponent(val))) return true;
         } catch(_) {}
@@ -820,67 +855,35 @@ const NAV_INJECT = `<script>
 
   /* ── Inject nav button ── */
   function injectNav(){
+    // Gunakan fixed button di body — tidak bisa dihapus oleh Mithril vDOM
+    // karena di luar container yang dikelola Mithril
     if(document.getElementById('rf-nav-btn')) return;
+    if(!document.body) return;
 
-    // Cari elemen nav "Overview" — tanpa offsetParent check (tidak reliable
-    // di navbar fixed/table GenieACS). Coba beberapa strategi:
-    var overviewEl = null;
-
-    // Strategi 1: cari <a> atau <li> atau <td> dengan teks persis "Overview"
-    var all = document.querySelectorAll('a,li,td,th,span,div');
-    for(var i=0;i<all.length;i++){
-      var el=all[i];
-      var txt = el.textContent.trim();
-      if(txt==='Overview' || txt.toLowerCase()==='overview'){
-        overviewEl=el; break;
-      }
-    }
-
-    // Strategi 2: cari via href yang mengandung "overview"
-    if(!overviewEl){
-      var links = document.querySelectorAll('a[href]');
-      for(var j=0;j<links.length;j++){
-        if(links[j].getAttribute('href').toLowerCase().indexOf('overview')>=0){
-          overviewEl=links[j]; break;
-        }
-      }
-    }
-
-    // Strategi 3: fallback — sisipkan ke dalam logo/header area
-    if(!overviewEl){
-      var logoImg = document.querySelector('img[src*="logo"]') ||
-                    document.querySelector('header') ||
-                    document.querySelector('nav');
-      if(logoImg){
-        var wrap = logoImg.parentNode || document.body;
-        var floatBtn = document.createElement('div');
-        floatBtn.id = 'rf-nav-btn';
-        floatBtn.innerHTML = '<span class="rf-finger">&#128071;</span>Ganti Logo';
-        floatBtn.style.cssText = 'position:fixed;top:8px;right:12px;z-index:9999;'+
-          'cursor:pointer;background:#c0392b;color:#fff;border-radius:4px;'+
-          'padding:4px 12px;font-weight:bold;font-size:13px;font-family:Arial,sans-serif;'+
-          'box-shadow:0 2px 6px rgba(0,0,0,.3);';
-        floatBtn.addEventListener('click',function(e){
-          e.preventDefault(); e.stopPropagation(); openModal();
-        });
-        document.body.appendChild(floatBtn);
-        return;
-      }
-      return;
-    }
-
-    var tag = overviewEl.tagName.toLowerCase();
-    var btn = document.createElement(tag);
+    var btn = document.createElement('div');
     btn.id = 'rf-nav-btn';
-    btn.innerHTML = '<span class="rf-finger">&#128071;</span>Ganti Logo Klik';
-    if(overviewEl.className) btn.className = overviewEl.className;
-    if(tag==='a'){ btn.setAttribute('href','javascript:void(0)'); }
-    btn.style.cssText += ';cursor:pointer;background:#c0392b!important;color:#fff!important;'+
-      'border-radius:4px;padding:4px 14px;font-weight:bold;border:none;';
-    btn.addEventListener('click',function(e){
+    btn.innerHTML = '<span class="rf-finger">&#128071;</span> Ganti Logo';
+    btn.style.cssText = [
+      'position:fixed',
+      'top:6px',
+      'right:14px',
+      'z-index:2147483646',
+      'cursor:pointer',
+      'background:#c0392b',
+      'color:#fff',
+      'border-radius:4px',
+      'padding:5px 14px',
+      'font-weight:bold',
+      'font-size:13px',
+      'font-family:Arial,sans-serif',
+      'box-shadow:0 2px 8px rgba(0,0,0,.35)',
+      'user-select:none',
+      'line-height:1.4'
+    ].join(';');
+    btn.addEventListener('click', function(e){
       e.preventDefault(); e.stopPropagation(); openModal();
     });
-    overviewEl.parentNode.insertBefore(btn, overviewEl);
+    document.body.appendChild(btn);
   }
 
   /* ── Startup ── */
@@ -924,6 +927,11 @@ function proxyRequest(req, res) {
     const headers = { ...req.headers, host: `127.0.0.1:${GENIE_PORT}` };
     delete headers['accept-encoding'];
 
+    // Isolasi cookie: rename session_<PORT> → session sebelum dikirim ke GenieACS
+    if (headers.cookie) {
+        headers.cookie = rewriteCookieForUpstream(headers.cookie);
+    }
+
     const opts = {
         hostname : '127.0.0.1',
         port     : GENIE_PORT,
@@ -935,6 +943,15 @@ function proxyRequest(req, res) {
     const proxy = http.request(opts, (pRes) => {
         const ct = (pRes.headers['content-type'] || '');
 
+        // Isolasi cookie: rename session → session_<PORT> di response
+        const respHeaders = { ...pRes.headers };
+        if (respHeaders['set-cookie']) {
+            const sc = respHeaders['set-cookie'];
+            respHeaders['set-cookie'] = Array.isArray(sc)
+                ? sc.map(rewriteSetCookie)
+                : [rewriteSetCookie(sc)];
+        }
+
         // Inject tombol hanya ke halaman HTML
         if (ct.includes('text/html')) {
             const chunks = [];
@@ -945,8 +962,6 @@ function proxyRequest(req, res) {
                 // Inject link logo ke navbar GenieACS
                 html = injectNavLink(html);
 
-                // Bersihkan headers yang perlu diupdate
-                const respHeaders = { ...pRes.headers };
                 delete respHeaders['content-length'];
                 delete respHeaders['content-encoding'];
                 delete respHeaders['transfer-encoding'];
@@ -962,8 +977,8 @@ function proxyRequest(req, res) {
             });
             pRes.on('error', () => res.end());
         } else {
-            // Non-HTML (JS, CSS, JSON, dll) — pass-through biasa
-            res.writeHead(pRes.statusCode, pRes.headers);
+            // Non-HTML (JS, CSS, JSON, dll) — pass-through dengan header yang sudah di-rewrite
+            res.writeHead(pRes.statusCode, respHeaders);
             pRes.pipe(res);
         }
     });
