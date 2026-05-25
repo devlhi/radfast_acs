@@ -31,19 +31,26 @@ check_port() {
 }
 
 print_row() {
-    local label="$1" url="$2" type="$3"
+    local label="$1" url="$2" type="$3" allow404="${4:-no}"
     local result icon
 
     if [[ "$type" == "http" ]]; then
         result=$(check_http "$url")
-        if [[ "$result" == "200" || "$result" == "302" || "$result" == "301" || "$result" == "401" ]]; then
+        # 404 dianggap OK untuk NBI/FS — mereka tidak serve root /, tapi service jalan
+        local ok_codes="200 302 301 401"
+        [[ "$allow404" == "yes" ]] && ok_codes="$ok_codes 404"
+        if echo "$ok_codes" | grep -qw "$result"; then
             icon="${GREEN}●${NC}"
             OK=$((OK+1))
-            printf "  ${icon} %-22s ${CYAN}%-32s${NC} ${GREEN}HTTP $result${NC}\n" "$label" "$url"
+            local note=""
+            [[ "$result" == "404" ]] && note=" ${DIM}(root / tidak ada, normal)${NC}"
+            printf "  ${icon} %-22s ${CYAN}%-32s${NC} ${GREEN}HTTP $result${NC}${note}\n" "$label" "$url"
         else
             icon="${RED}●${NC}"
             FAIL=$((FAIL+1))
-            printf "  ${icon} %-22s ${CYAN}%-32s${NC} ${RED}HTTP $result (down/timeout)${NC}\n" "$label" "$url"
+            local reason="down/timeout"
+            [[ "$result" == "000" ]] && reason="koneksi ditolak/timeout"
+            printf "  ${icon} %-22s ${CYAN}%-32s${NC} ${RED}HTTP $result ($reason)${NC}\n" "$label" "$url"
         fi
     else
         local host port
@@ -88,10 +95,18 @@ while IFS= read -r line; do
     echo -e "  ${BOLD}▶ $NAME${NC}  —  http://${IP}:${UI}"
     echo -e "  ─────────────────────────────────────────────────────"
 
-    print_row "UI (Dashboard)"  "http://${IP}:${UI}"   "http"
-    print_row "CWMP (TR-069)"   "${IP}:${CWMP}"        "tcp"
-    print_row "NBI  (REST API)" "http://${IP}:${NBI}"  "http"
-    print_row "FS   (File Svr)" "http://${IP}:${FS}"   "http"
+    print_row "UI (Dashboard)"  "http://${IP}:${UI}"   "http" "no"
+    print_row "CWMP (TR-069)"   "${IP}:${CWMP}"        "tcp"  "no"
+    print_row "NBI  (REST API)" "http://${IP}:${NBI}"  "http" "yes"
+    print_row "FS   (File Svr)" "http://${IP}:${FS}"   "http" "yes"
+
+    # Diagnosis otomatis kalau UI down
+    if [[ "$(check_http "http://${IP}:${UI}")" == "000" ]]; then
+        echo -e "  ${YELLOW}  ⚠ UI down — cek:${NC}"
+        echo -e "  ${DIM}    systemctl status genieacs-${NAME}-proxy${NC}"
+        echo -e "  ${DIM}    systemctl status genieacs-${NAME}-ui${NC}"
+        echo -e "  ${DIM}    journalctl -u genieacs-${NAME}-proxy -n 20${NC}"
+    fi
 
 done < "$REGISTRY"
 
