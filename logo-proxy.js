@@ -934,8 +934,13 @@ const COOKIE_WRAPPER = String.raw`<script>
 </script>`;
 
 function injectNavLink(html) {
-    // Cookie wrapper masuk di </head> agar aktif sebelum app.js
-    if (html.includes('</head>')) {
+    // COOKIE_WRAPPER harus jalan SEBELUM app.js — inject di awal <head>
+    // bukan di </head>, karena GenieACS load app.js synchronous di <head>
+    if (html.includes('<head>')) {
+        html = html.replace('<head>', '<head>' + COOKIE_WRAPPER);
+    } else if (html.includes('<HEAD>')) {
+        html = html.replace('<HEAD>', '<HEAD>' + COOKIE_WRAPPER);
+    } else if (html.includes('</head>')) {
         html = html.replace('</head>', COOKIE_WRAPPER + '</head>');
     }
     if (html.includes('</body>')) {
