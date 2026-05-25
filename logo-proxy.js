@@ -1047,6 +1047,71 @@ const COOKIE_WRAPPER = String.raw`<script>
 })();
 </script>`;
 
+// Script ganti logo GenieACS via DOM (tidak bergantung pada URL /public/)
+// GenieACS bisa inline logo di JS bundle (data URI / webpack) — HTTP intercept tidak cukup
+// Solusi: cari img di header, replace src-nya, pakai MutationObserver agar Mithril tidak reset
+function buildLogoReplacerScript(ts) {
+    return String.raw`<script>
+(function(){
+  'use strict';
+  var SRC='/__admin/logo/preview?t=${ts}';
+
+  function findLogo(){
+    var imgs=document.querySelectorAll('img');
+    // Cari img dengan src yang mengandung /public/ (URL-based logo)
+    for(var i=0;i<imgs.length;i++){
+      var s=imgs[i].getAttribute('src')||'';
+      if(s.indexOf('/public/')>=0) return imgs[i];
+    }
+    // Fallback: img pertama di halaman = logo GenieACS di header
+    if(imgs.length>0) return imgs[0];
+    return null;
+  }
+
+  function fix(){
+    var img=findLogo();
+    if(!img) return;
+    // Jangan replace kalau sudah pakai URL kita (cegah loop)
+    if((img.getAttribute('src')||'').indexOf('/__admin/logo/')>=0) return;
+    img.setAttribute('src',SRC);
+    // Paksa reload kalau browser cache lama
+    img.style.visibility='hidden';
+    img.style.visibility='';
+  }
+
+  // Jalankan setelah Mithril selesai render pertama kali
+  fix();
+  setTimeout(fix,200); setTimeout(fix,700); setTimeout(fix,2000);
+
+  // Setelah navigasi SPA (hashchange) Mithril re-render — re-apply logo
+  window.addEventListener('hashchange',function(){setTimeout(fix,150);});
+
+  // MutationObserver: tangkap saat Mithril reset img.src
+  var obs=new MutationObserver(function(mutations){
+    for(var i=0;i<mutations.length;i++){
+      var t=mutations[i].target;
+      // Kalau attributenya src dan valuenya bukan logo kita → fix
+      if(mutations[i].type==='attributes'&&t.tagName==='IMG'){
+        var s=t.getAttribute('src')||'';
+        if(s.indexOf('/__admin/logo/')<0&&s.indexOf('/public/')>=0){fix();return;}
+      }
+    }
+    // childList: Mithril buat node baru
+    fix();
+  });
+  function startObs(){
+    obs.observe(document.body,{
+      childList:true,subtree:true,
+      attributes:true,attributeFilter:['src']
+    });
+  }
+  if(document.body) startObs();
+  else window.addEventListener('DOMContentLoaded',startObs);
+  window.addEventListener('load',fix);
+})();
+</script>`;
+}
+
 function injectNavLink(html) {
     // COOKIE_WRAPPER wajib jalan SEBELUM app.js → inject di awal <head>
     var headTag = html.match(/<head[^>]*>/i);
@@ -1055,13 +1120,19 @@ function injectNavLink(html) {
     } else if (html.includes('</head>')) {
         html = html.replace('</head>', COOKIE_WRAPPER + '</head>');
     }
+
+    // Kalau ada custom logo → tambahkan script pengganti logo DOM
+    const logoScript = findCustomLogo() ? buildLogoReplacerScript(Date.now()) : '';
+
+    const toInject = NAV_INJECT + logoScript;
+
     if (html.includes('</body>')) {
-        return html.replace('</body>', NAV_INJECT + '</body>');
+        return html.replace('</body>', toInject + '</body>');
     }
     if (html.includes('</html>')) {
-        return html.replace('</html>', NAV_INJECT + '</html>');
+        return html.replace('</html>', toInject + '</html>');
     }
-    return html + NAV_INJECT;
+    return html + toInject;
 }
 
 // ════════════════════════════════════════════════════════════
