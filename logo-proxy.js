@@ -35,39 +35,30 @@ const MAX_SIZE     = 2 * 1024 * 1024; // 2 MB hard limit
 const PORT_PREFIX = `_p${PUBLIC_PORT}_`;
 const JWT_PATTERN = /^[\w-]+\.[\w-]{10,}\.[\w-]+$/; // deteksi JWT: xxx.xxx.xxx
 
-// Response dari GenieACS: prefix cookie yang isinya JWT
+// Response dari GenieACS: prefix SEMUA cookie dengan port prefix
+// (bukan hanya JWT — ini mencakup cookie logout/delete juga)
 function rewriteSetCookie(val) {
-    // Format Set-Cookie: name=value; Path=/; ...
     const eqIdx = val.indexOf('=');
     if (eqIdx < 0) return val;
-    const name    = val.slice(0, eqIdx).trim();
-    const rest    = val.slice(eqIdx + 1); // "value; Path=/; ..."
-    const semIdx  = rest.indexOf(';');
-    const cookVal = semIdx >= 0 ? rest.slice(0, semIdx) : rest;
-    const attrs   = semIdx >= 0 ? rest.slice(semIdx) : '';
-
-    // Skip cookie milik proxy sendiri
-    if (name.startsWith('_p') || name === '_rfcsrf') return val;
-    // Hanya prefix cookie yang valuenya JWT
-    if (JWT_PATTERN.test(cookVal.trim())) {
-        return `${PORT_PREFIX}${name}=${cookVal}${attrs}`;
-    }
-    return val;
+    const name = val.slice(0, eqIdx).trim();
+    // Skip cookie yang sudah punya prefix atau milik proxy
+    if (/^_p\d+_/.test(name) || name === '_rfcsrf') return val;
+    return `${PORT_PREFIX}${name}${val.slice(eqIdx)}`;
 }
 
-// Request ke GenieACS: kembalikan nama cookie asli, buang milik instance lain
+// Request ke GenieACS: strip prefix, buang cookie milik instance lain
 function rewriteCookieForUpstream(cookieStr) {
     if (!cookieStr) return cookieStr;
     return cookieStr.split(';').map(c => {
         const t = c.trimStart();
-        // Cookie milik instance ini → hapus prefix
+        // Cookie milik instance ini → hapus prefix (trimStart agar tidak ada spasi di awal)
         if (t.startsWith(PORT_PREFIX)) {
-            return c.replace(PORT_PREFIX, '');
+            return t.slice(PORT_PREFIX.length);
         }
         // Cookie milik instance lain → buang
         if (/^_p\d+_/.test(t)) return null;
         return c;
-    }).filter(v => v !== null).join(';');
+    }).filter(v => v !== null).join('; ');
 }
 
 // Logo setiap instance disimpan di folder instance masing-masing
@@ -907,7 +898,46 @@ const NAV_INJECT = String.raw`<script>
 })();
 </script>`;
 
+// Injeksi di <head> — SEBELUM app.js dijalankan — agar document.cookie sudah
+// terisolasi saat Mithril/GenieACS membaca atau menulis sesi.
+// Getter: strip PORT_PREFIX dari cookie milik instance ini, sembunyikan cookie
+//         instance lain (nama mulai _p<angka>_).
+// Setter: tambah PORT_PREFIX ke semua cookie kecuali yang sudah punya prefix
+//         atau milik proxy CSRF.
+const COOKIE_WRAPPER = String.raw`<script>
+(function(){
+  'use strict';
+  var P='_p${PUBLIC_PORT}_';
+  var d=Object.getOwnPropertyDescriptor(Document.prototype,'cookie')||
+        Object.getOwnPropertyDescriptor(HTMLDocument.prototype,'cookie');
+  if(!d||!d.configurable)return;
+  Object.defineProperty(document,'cookie',{
+    configurable:true,
+    get:function(){
+      return d.get.call(document).split(';').map(function(c){
+        var t=c.trim();if(!t)return'';
+        if(t.slice(0,P.length)===P)return t.slice(P.length);
+        if(/^_p\d+_/.test(t))return'';
+        return c;
+      }).filter(Boolean).join('; ');
+    },
+    set:function(v){
+      if(v==null)return;
+      var e=v.indexOf('=');
+      if(e<0){d.set.call(document,v);return;}
+      var n=v.slice(0,e).trim();
+      if(/^_p\d+_/.test(n)||n==='_rfcsrf'){d.set.call(document,v);return;}
+      d.set.call(document,P+n+v.slice(e));
+    }
+  });
+})();
+</script>`;
+
 function injectNavLink(html) {
+    // Cookie wrapper masuk di </head> agar aktif sebelum app.js
+    if (html.includes('</head>')) {
+        html = html.replace('</head>', COOKIE_WRAPPER + '</head>');
+    }
     if (html.includes('</body>')) {
         return html.replace('</body>', NAV_INJECT + '</body>');
     }
@@ -927,6 +957,11 @@ function proxyRequest(req, res) {
     const headers = { ...req.headers, host: `127.0.0.1:${GENIE_PORT}` };
     delete headers['accept-encoding'];
 
+    // Cookie isolation: hapus prefix sebelum diteruskan ke GenieACS
+    if (headers.cookie) {
+        headers.cookie = rewriteCookieForUpstream(headers.cookie);
+    }
+
     const opts = {
         hostname : '127.0.0.1',
         port     : GENIE_PORT,
@@ -939,6 +974,14 @@ function proxyRequest(req, res) {
         const ct = (pRes.headers['content-type'] || '');
 
         const respHeaders = { ...pRes.headers };
+
+        // Cookie isolation: prefix semua Set-Cookie dari GenieACS
+        if (respHeaders['set-cookie']) {
+            const sc = respHeaders['set-cookie'];
+            respHeaders['set-cookie'] = Array.isArray(sc)
+                ? sc.map(rewriteSetCookie)
+                : [rewriteSetCookie(sc)];
+        }
 
         // Inject tombol hanya ke halaman HTML
         if (ct.includes('text/html')) {
