@@ -569,9 +569,7 @@ const NAV_INJECT = `<script>
         'font-size:13px;display:none;}',
         '#rf-msg.ok{background:#dff0d8;color:#2d6a0f;border:1px solid #b8dca0;display:block;}',
         '#rf-msg.er{background:#f2dede;color:#8b1a1a;border:1px solid #e0b0b0;display:block;}',
-        '@keyframes rf-bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}',
-        '#rf-nav-btn{display:inline-flex!important;flex-direction:column;align-items:center;line-height:1.2;}',
-        '#rf-nav-btn .rf-finger{display:block;font-size:16px;animation:rf-bounce 0.7s ease-in-out infinite;}'
+        '@keyframes rf-bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}'
       ].join('');
       document.head.appendChild(s);
     }
@@ -864,11 +862,8 @@ const NAV_INJECT = `<script>
   /* ── Inject nav button ── */
   function injectNav(){
     if(document.getElementById('rf-nav-btn')) return;
-    if(!document.body) return;
-
     var btn = document.createElement('div');
     btn.id = 'rf-nav-btn';
-    // Gunakan setAttribute style agar tidak bisa di-override GenieACS CSS
     btn.setAttribute('style',
       'position:fixed;top:8px;right:12px;z-index:2147483647;' +
       'cursor:pointer;background:#c0392b;color:#fff;' +
@@ -880,29 +875,21 @@ const NAV_INJECT = `<script>
     btn.addEventListener('click', function(e){
       e.preventDefault(); e.stopPropagation(); openModal();
     });
-    document.body.appendChild(btn);
+    // Append ke <html> (documentElement), bukan <body>
+    // Mithril hanya manages document.body, jadi tombol ini aman dari re-render Mithril
+    document.documentElement.appendChild(btn);
   }
 
   /* ── Startup ── */
-  // Tunggu window.load (semua JS selesai) lalu inject
-  // Ini memastikan Mithril sudah init sebelum kita append ke body
-  function start(){
-    // Inject langsung jika body sudah siap
-    if(document.body) injectNav();
+  // Inject segera — script ini di-inject sebelum </body>, DOM sudah ada
+  // Tidak perlu tunggu window.load karena kita append ke documentElement (bukan body)
+  injectNav();
 
-    // Watch jika Mithril clear body dan hapus tombol kita
-    var obs = new MutationObserver(function(){
-      if(!document.getElementById('rf-nav-btn')) injectNav();
-    });
-    obs.observe(document.documentElement,{childList:true,subtree:true});
-  }
-
-  // window.load = semua resource (termasuk Mithril app.js) sudah selesai
-  if(document.readyState === 'complete'){
-    start();
-  } else {
-    window.addEventListener('load', start);
-  }
+  // MutationObserver sebagai backup — re-inject jika browser memindahkan elemen
+  var obs = new MutationObserver(function(){
+    if(!document.getElementById('rf-nav-btn')) injectNav();
+  });
+  obs.observe(document.documentElement,{childList:true,subtree:true});
 
   // Handle direct URL /__admin/logo
   if(location.pathname==='/__admin/logo'){
