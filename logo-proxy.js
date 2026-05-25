@@ -516,7 +516,7 @@ function parseMultipart(body, boundary) {
 //  Inject link "🖼 Logo" sejajar dengan tab nav yang ada.
 //  Tidak menggunakan position:fixed agar tidak nutup konten.
 // ════════════════════════════════════════════════════════════
-const NAV_INJECT = `<script>
+const NAV_INJECT = String.raw`<script>
 (function(){
   'use strict';
   var ADMIN = '/__admin/logo';
@@ -897,7 +897,7 @@ const NAV_INJECT = `<script>
     setTimeout(openModal,800);
   }
 })();
-<\/script>`;
+</script>`;
 
 function injectNavLink(html) {
     if (html.includes('</body>')) {
