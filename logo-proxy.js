@@ -219,14 +219,46 @@ function isGenieSession(req) {
     if (bear && verifyGenieJWT(bear[1])) return true;
 
     // Cek semua cookie — coba setiap nilai sebagai JWT
-    // (tidak bergantung pada nama cookie, kompatibel dengan semua versi GenieACS)
     const cookieStr = req.headers['cookie'] || '';
-    for (const part of cookieStr.split(';')) {
-        const val = part.trim().split('=').slice(1).join('=');
-        try {
-            if (val && verifyGenieJWT(decodeURIComponent(val))) return true;
-        } catch(_) {}
+    if (!cookieStr) {
+        console.log('[auth] FAIL: tidak ada cookie header');
+        return false;
     }
+
+    const names = [];
+    for (const part of cookieStr.split(';')) {
+        const eq = part.indexOf('=');
+        if (eq < 0) continue;
+        const name = part.slice(0, eq).trim();
+        const raw  = part.slice(eq + 1).trim();
+        names.push(name);
+        try {
+            const val = decodeURIComponent(raw);
+            if (!val) continue;
+            const parts = val.split('.');
+            if (parts.length === 3) {
+                // Terlihat seperti JWT — coba verify
+                if (verifyGenieJWT(val)) return true;
+                // Gagal — log alasannya
+                try {
+                    const pl = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
+                    if (pl.exp && Date.now() / 1000 > pl.exp) {
+                        console.log(`[auth] cookie "${name}" JWT expired (exp=${pl.exp})`);
+                    } else if (!JWT_SECRET) {
+                        console.log(`[auth] cookie "${name}" JWT_SECRET kosong!`);
+                    } else {
+                        console.log(`[auth] cookie "${name}" signature tidak cocok`);
+                    }
+                } catch(_) {
+                    console.log(`[auth] cookie "${name}" bukan JWT valid`);
+                }
+            }
+        } catch(e) {
+            console.log(`[auth] cookie "${name}" decode error: ${e.message}`);
+        }
+    }
+
+    console.log(`[auth] FAIL: tidak ada JWT valid. Cookie names: [${names.join(', ')}]`);
     return false;
 }
 
@@ -1108,8 +1140,12 @@ const server = http.createServer((req, res) => {
     const ip  = getIP(req);
 
     // ── Slow-loris / timeout protection ──────────────────────
-    req.socket.setTimeout(30000); // 30 detik max per koneksi
-    req.socket.on('timeout', () => { req.socket.destroy(); });
+    req.socket.setTimeout(30000);
+    // Tambah listener sekali saja per socket (keep-alive bisa reuse socket)
+    if (!req.socket._rfTimeout) {
+        req.socket._rfTimeout = true;
+        req.socket.on('timeout', () => { req.socket.destroy(); });
+    }
 
     // ── Blokir Content-Length terlalu besar SEBELUM baca body ─
     if (req.method === 'POST') {
