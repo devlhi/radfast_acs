@@ -1424,6 +1424,11 @@ const server = http.createServer((req, res) => {
     //   /public/logo-<hash>.svg
     // Tangkap semua path yang ada kata "logo" di bawah /public/
     // dengan ekstensi gambar apapun.
+    // Log semua request /public/ untuk deteksi URL logo asli GenieACS
+    if (/\/public\//i.test(req.url)) {
+        console.log(`[public] ${req.url}`);
+    }
+
     const isLogoReq = /\/public\/[^/]*logo[^/]*\.(svg|png|jpe?g|gif|webp|ico|bmp)/i.test(req.url);
     if (isLogoReq) {
         const custom = findCustomLogo();
