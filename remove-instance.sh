@@ -47,8 +47,8 @@ USERNAME=$(echo "$USERNAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')
 INST_DIR="$INSTANCES_DIR/$USERNAME"
 DB_NAME="genieacs_${USERNAME}"
 
-# Ambil info dari .env
-UI_PORT=$(grep -oP 'GENIEACS_UI_PORT=\K[0-9]+' "$INST_DIR/.env" 2>/dev/null || echo "?")
+# Ambil info dari .env (UI = port publik proxy, bukan port internal GenieACS)
+UI_PORT=$(grep -oP 'RADFAST_PROXY_PORT=\K[0-9]+' "$INST_DIR/.env" 2>/dev/null || echo "?")
 CWMP_PORT=$(grep -oP 'GENIEACS_CWMP_PORT=\K[0-9]+' "$INST_DIR/.env" 2>/dev/null || echo "?")
 
 # ── Konfirmasi ───────────────────────────────────────────────

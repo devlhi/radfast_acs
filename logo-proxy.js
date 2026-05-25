@@ -26,88 +26,12 @@ const GENIE_PORT   = parseInt(process.env.RADFAST_UI_INTERNAL      || 13001);
 const LOGO_BASE    = process.env.RADFAST_LOGO_FILE                 || '/tmp/radfast-logo';
 const ADMIN_TOKEN  = process.env.RADFAST_ADMIN_TOKEN               || '';
 const JWT_SECRET   = process.env.GENIEACS_UI_JWT_SECRET            || '';
-const APP_PUBLIC   = process.env.RADFAST_APP_PUBLIC                || '/opt/genieacs-app/public';
 const MAX_SIZE     = 2 * 1024 * 1024; // 2 MB hard limit
 
-// Temukan semua file logo di folder public GenieACS (logo-*.svg dst)
-function findAppLogoFiles() {
-    try {
-        return fs.readdirSync(APP_PUBLIC)
-            .filter(f => /^logo[^/]*\.(svg|png|jpe?g|gif|webp|ico|bmp)$/i.test(f))
-            .map(f => path.join(APP_PUBLIC, f));
-    } catch(_) { return []; }
-}
-
-// Backup logo asli GenieACS (simpan sekali saja)
-function backupOriginalLogos() {
-    for (const f of findAppLogoFiles()) {
-        const bak = f + '.radfast-orig';
-        if (!fs.existsSync(bak)) {
-            try { fs.copyFileSync(f, bak); } catch(_) {}
-        }
-    }
-}
-
-// Bungkus PNG/JPG/GIF/WebP dalam SVG agar bisa replace file .svg
-// tanpa merusak format (browser expect SVG, kita embed image di dalamnya)
-function wrapInSVG(imageData, ext) {
-    const mimeType = MIME[ext] || 'image/png';
-    const b64 = imageData.toString('base64');
-    return Buffer.from(
-        `<svg xmlns="http://www.w3.org/2000/svg" ` +
-        `xmlns:xlink="http://www.w3.org/1999/xlink" ` +
-        `viewBox="0 0 300 100" preserveAspectRatio="xMidYMid meet">` +
-        `<image href="data:${mimeType};base64,${b64}" ` +
-        `x="0" y="0" width="300" height="100" ` +
-        `preserveAspectRatio="xMidYMid meet"/>` +
-        `</svg>`
-    );
-}
-
-// Terapkan custom logo ke folder public GenieACS
-// Semua file logo-*.svg di public diganti dengan custom logo
-// Kalau upload bukan SVG → bungkus dalam SVG wrapper dulu
-function applyLogoToApp(logoFile) {
-    backupOriginalLogos();
-    const targets = findAppLogoFiles();
-    if (targets.length === 0) {
-        console.warn('[logo] Tidak ada file logo di', APP_PUBLIC);
-        return;
-    }
-
-    const ext = path.extname(logoFile).toLowerCase();
-    let fileData = fs.readFileSync(logoFile);
-
-    // Kalau bukan SVG, bungkus dalam SVG supaya browser bisa render
-    if (ext !== '.svg') {
-        fileData = wrapInSVG(fileData, ext);
-        console.log(`[logo] Wrapped ${ext} → SVG untuk app/public`);
-    }
-
-    for (const target of targets) {
-        try {
-            fs.writeFileSync(target, fileData);
-            console.log('[logo] Applied custom logo →', target);
-        } catch(e) {
-            console.error('[logo] Gagal write ke', target, ':', e.message);
-        }
-    }
-}
-
-// Restore logo asli GenieACS dari backup
-function restoreOriginalLogos() {
-    for (const f of findAppLogoFiles()) {
-        const bak = f + '.radfast-orig';
-        if (fs.existsSync(bak)) {
-            try {
-                fs.copyFileSync(bak, f);
-                console.log('[logo] Restored original →', f);
-            } catch(e) {
-                console.error('[logo] Gagal restore', f, ':', e.message);
-            }
-        }
-    }
-}
+// Logo setiap instance disimpan di folder instance masing-masing
+// (LOGO_BASE = /opt/genieacs-instances/<user>/logo/custom-logo)
+// Proxy intercept request logo → serve dari folder instance sendiri
+// sehingga tiap instance punya logo terpisah, tidak saling overwrite
 
 // ════════════════════════════════════════════════════════════
 //  CSRF TOKEN STORE
@@ -1219,10 +1143,6 @@ const server = http.createServer((req, res) => {
                 fs.mkdirSync(path.dirname(savePath), { recursive: true });
                 fs.writeFileSync(savePath, finalData, { mode: 0o640 });
 
-                // ── Terapkan langsung ke folder public GenieACS ──
-                // Ini memastikan logo berubah langsung tanpa tergantung proxy intercept
-                applyLogoToApp(savePath);
-
                 recordSuccess(ip);
 
                 sendSecure(res, 200, 'text/html; charset=utf-8',
@@ -1285,7 +1205,6 @@ const server = http.createServer((req, res) => {
             }
 
             deleteAllLogo();
-            restoreOriginalLogos();
             auditLog('RESET', ip, 'Logo direset ke default');
             sendSecure(res, 200, 'text/html; charset=utf-8',
                 uploadPage('<div class="msg ok">✅ Logo direset ke logo default.</div>', authed));
