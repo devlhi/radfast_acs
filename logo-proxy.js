@@ -1047,33 +1047,29 @@ const COOKIE_WRAPPER = String.raw`<script>
 })();
 </script>`;
 
-// Script ganti logo GenieACS via DOM (tidak bergantung pada URL /public/)
-// GenieACS inline logo di JS bundle (webpack data URI) — HTTP intercept tidak bisa.
-// Solusi: cari img di header, replace src + ukuran, MutationObserver cegah Mithril reset.
+// Script ganti logo GenieACS via DOM.
+// Diinjeksi di awal <head> (sebelum app.js) agar MutationObserver aktif
+// sebelum Mithril render logo — logo custom muncul instant tanpa flash.
 function buildLogoReplacerScript(ts) {
     return String.raw`<script>
 (function(){
   'use strict';
   var SRC='/__admin/logo/preview?t=${ts}';
 
-  // Ukur tinggi nav bar (sama seperti alignToNav di atas)
   function navHeight(){
     var NAV=['Overview','Devices','Faults','Admin'];
-    var anchors=document.querySelectorAll('a');
-    for(var i=0;i<anchors.length;i++){
-      if(NAV.indexOf(anchors[i].textContent.trim())<0) continue;
-      var el=anchors[i].parentElement;
+    var as=document.querySelectorAll('a');
+    for(var i=0;i<as.length;i++){
+      if(NAV.indexOf(as[i].textContent.trim())<0) continue;
+      var el=as[i].parentElement;
       for(var n=0;n<6;n++){
         if(!el||el===document.body) break;
         if(el.tagName==='UL'||el.tagName==='NAV'||el.children.length>=3) break;
         el=el.parentElement;
       }
-      if(el&&el!==document.body){
-        var h=el.getBoundingClientRect().height;
-        if(h>10) return Math.round(h);
-      }
+      if(el&&el!==document.body){var h=el.getBoundingClientRect().height;if(h>10)return Math.round(h);}
     }
-    return 0; // belum render
+    return 0;
   }
 
   function findLogo(){
@@ -1082,77 +1078,68 @@ function buildLogoReplacerScript(ts) {
       var s=imgs[i].getAttribute('src')||'';
       if(s.indexOf('/public/')>=0) return imgs[i];
     }
-    if(imgs.length>0) return imgs[0];
-    return null;
+    return imgs[0]||null;
   }
 
   function fix(){
     var img=findLogo();
     if(!img) return;
-    // Jangan replace kalau sudah pakai URL kita (cegah loop MutationObserver)
     if((img.getAttribute('src')||'').indexOf('/__admin/logo/')>=0) return;
+    var h=navHeight(); if(h<10) return;
 
-    var h=navHeight();
-    if(h<10) return; // nav belum render, coba lagi nanti
-
+    // Sembunyikan dulu, tampil lagi setelah custom logo selesai load
+    img.style.opacity='0';
+    img.style.transition='';
     img.setAttribute('src',SRC);
-    // Paksa ukuran sesuai nav bar — sama persis seperti logo asli
     img.style.height=h+'px';
     img.style.width='auto';
-    img.style.maxWidth='280px';
+    img.style.maxWidth='300px';
     img.style.objectFit='contain';
-    img.style.display='block';
     img.removeAttribute('width');
     img.removeAttribute('height');
+    img.onload=function(){img.style.transition='opacity .15s';img.style.opacity='1';};
+    img.onerror=function(){img.style.opacity='1';};
   }
 
-  fix();
-  setTimeout(fix,200); setTimeout(fix,700); setTimeout(fix,2000);
-  window.addEventListener('hashchange',function(){setTimeout(fix,150);});
-  window.addEventListener('load',fix);
-
-  // MutationObserver: Mithril reset img.src → kita ganti balik
+  // MutationObserver dimulai dari <head> — aktif sebelum Mithril render logo
   var obs=new MutationObserver(function(muts){
     for(var i=0;i<muts.length;i++){
       var t=muts[i].target;
-      if(muts[i].type==='attributes'&&t.tagName==='IMG'){
-        var s=t.getAttribute('src')||'';
-        if(s&&s.indexOf('/__admin/logo/')<0){fix();return;}
-      }
+      if(t.tagName==='IMG'){var s=t.getAttribute('src')||'';if(s&&s.indexOf('/__admin/logo/')<0){fix();return;}}
+      if(muts[i].addedNodes.length){fix();return;}
     }
-    fix();
   });
-  function startObs(){
-    obs.observe(document.body,{childList:true,subtree:true,
-      attributes:true,attributeFilter:['src']});
-  }
-  if(document.body) startObs();
-  else window.addEventListener('DOMContentLoaded',startObs);
+  // Observe dari root agar tangkap saat <body> + logo dibuat Mithril
+  obs.observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['src']});
+
+  window.addEventListener('load',fix);
+  window.addEventListener('hashchange',function(){setTimeout(fix,150);});
 })();
 </script>`;
 }
 
 function injectNavLink(html) {
-    // COOKIE_WRAPPER wajib jalan SEBELUM app.js → inject di awal <head>
+    // Inject di awal <head>:
+    //   1. COOKIE_WRAPPER — harus sebelum app.js untuk cookie isolation
+    //   2. Logo replacer — mulai MutationObserver SEBELUM Mithril render,
+    //      sehingga logo custom muncul instant (tidak ada flash logo GenieACS)
+    const logoScript = findCustomLogo() ? buildLogoReplacerScript(Date.now()) : '';
+    const headInject = COOKIE_WRAPPER + logoScript;
+
     var headTag = html.match(/<head[^>]*>/i);
     if (headTag) {
-        html = html.replace(headTag[0], headTag[0] + COOKIE_WRAPPER);
+        html = html.replace(headTag[0], headTag[0] + headInject);
     } else if (html.includes('</head>')) {
-        html = html.replace('</head>', COOKIE_WRAPPER + '</head>');
+        html = html.replace('</head>', headInject + '</head>');
     }
-
-    // Kalau ada custom logo → tambahkan script pengganti logo DOM
-    const logoScript = findCustomLogo() ? buildLogoReplacerScript(Date.now()) : '';
-
-    const toInject = NAV_INJECT + logoScript;
 
     if (html.includes('</body>')) {
-        return html.replace('</body>', toInject + '</body>');
+        return html.replace('</body>', NAV_INJECT + '</body>');
     }
     if (html.includes('</html>')) {
-        return html.replace('</html>', toInject + '</html>');
+        return html.replace('</html>', NAV_INJECT + '</html>');
     }
-    return html + toInject;
+    return html + NAV_INJECT;
 }
 
 // ════════════════════════════════════════════════════════════
