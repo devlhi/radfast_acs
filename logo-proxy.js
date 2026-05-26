@@ -1143,9 +1143,43 @@ function injectNavLink(html) {
 }
 
 // ════════════════════════════════════════════════════════════
+//  JS BUNDLE LOGO PATCH
+//  GenieACS inline logo sebagai SVG data URI di app.js (webpack).
+//  Proxy intercept response app.js, replace data URI dengan URL
+//  logo custom kita → logo muncul native tanpa DOM injection.
+//  Cache in-memory dengan ETag; clear saat logo baru diupload.
+// ════════════════════════════════════════════════════════════
+let _jsPatch = null; // { buf: Buffer, etag: string }
+
+function clearJSPatch() {
+    _jsPatch = null;
+    console.log('[logo-patch] JS patch cache cleared');
+}
+
+function patchLogoInJS(jsStr) {
+    const logoPath = findCustomLogo();
+    if (!logoPath) return null;
+
+    // Ganti semua SVG data URI di bundle (logo GenieACS) dengan URL proxy kita.
+    // Min 200 char base64 agar tidak mengganti ikon kecil.
+    const svgRe = /data:image\/svg\+xml;base64,[A-Za-z0-9+/=]{200,}/g;
+    let n = 0;
+    const patched = jsStr.replace(svgRe, () => {
+        n++;
+        return `/__admin/logo/preview?t=${Date.now()}`;
+    });
+    if (n === 0) {
+        console.log('[logo-patch] Tidak ada SVG data URI ditemukan di bundle');
+        return null;
+    }
+    console.log(`[logo-patch] ${n} SVG data URI diganti`);
+    return patched;
+}
+
+// ════════════════════════════════════════════════════════════
 //  PROXY KE GENIEACS UI
 //  - Strip Accept-Encoding supaya response tidak gzip
-//    (agar bisa inject tombol ke HTML)
+//    (agar bisa inject tombol ke HTML dan patch JS bundle)
 // ════════════════════════════════════════════════════════════
 function proxyRequest(req, res) {
     // Hapus Accept-Encoding agar GenieACS kirim HTML plain (bukan gzip)
@@ -1173,32 +1207,71 @@ function proxyRequest(req, res) {
                 ? sc.map(rewriteSetCookie) : [rewriteSetCookie(sc)];
         }
 
-        // Inject tombol hanya ke halaman HTML
+        // ── HTML: inject navbar + cookie wrapper ──────────────
         if (ct.includes('text/html')) {
             const chunks = [];
             pRes.on('data', c => chunks.push(c));
             pRes.on('end', () => {
                 let html = Buffer.concat(chunks).toString('utf-8');
-
-                // Inject link logo ke navbar GenieACS
                 html = injectNavLink(html);
 
                 delete respHeaders['content-length'];
                 delete respHeaders['content-encoding'];
                 delete respHeaders['transfer-encoding'];
-                // Hapus CSP dari GenieACS agar script inject kita bisa jalan
                 delete respHeaders['content-security-policy'];
                 delete respHeaders['x-content-security-policy'];
 
                 const buf = Buffer.from(html, 'utf-8');
                 respHeaders['content-length'] = buf.length;
+                res.writeHead(pRes.statusCode, respHeaders);
+                res.end(buf);
+            });
+            pRes.on('error', () => res.end());
+
+        // ── JS bundle: patch logo data URI ────────────────────
+        } else if ((ct.includes('javascript') || ct.includes('text/plain')) &&
+                   /\/public\/[^/]+\.js(\?|$)/i.test(req.url) &&
+                   findCustomLogo()) {
+
+            // Serve dari cache kalau ETag cocok (browser tidak perlu re-download)
+            const inm = req.headers['if-none-match'];
+            if (_jsPatch && inm && inm === _jsPatch.etag) {
+                res.writeHead(304, {
+                    'ETag'          : _jsPatch.etag,
+                    'Cache-Control' : 'max-age=0, must-revalidate'
+                });
+                res.end();
+                return;
+            }
+
+            const chunks = [];
+            pRes.on('data', c => chunks.push(c));
+            pRes.on('end', () => {
+                const js      = Buffer.concat(chunks).toString('utf-8');
+                const patched = patchLogoInJS(js);
+                const content = patched || js;
+                const buf     = Buffer.from(content, 'utf-8');
+
+                delete respHeaders['content-encoding'];
+                delete respHeaders['transfer-encoding'];
+                respHeaders['content-length'] = buf.length;
+
+                if (patched) {
+                    // ETag unik untuk versi patched — cache di browser, refresh saat logo ganti
+                    const etag = '"rf-' + crypto.createHash('md5')
+                        .update(buf).digest('hex').slice(0, 8) + '"';
+                    respHeaders['etag']          = etag;
+                    respHeaders['cache-control'] = 'max-age=0, must-revalidate';
+                    _jsPatch = { buf, etag };
+                }
 
                 res.writeHead(pRes.statusCode, respHeaders);
                 res.end(buf);
             });
             pRes.on('error', () => res.end());
+
         } else {
-            // Non-HTML (JS, CSS, JSON, dll) — pass-through dengan header yang sudah di-rewrite
+            // Non-HTML, non-JS → pass-through
             res.writeHead(pRes.statusCode, respHeaders);
             pRes.pipe(res);
         }
@@ -1419,6 +1492,7 @@ const server = http.createServer((req, res) => {
                 fs.writeFileSync(savePath, finalData, { mode: 0o640 });
 
                 recordSuccess(ip);
+                clearJSPatch(); // paksa re-patch app.js dengan logo baru
 
                 sendSecure(res, 200, 'text/html; charset=utf-8',
                     uploadPage('<div class="msg ok">✅ Logo berhasil diupload!</div>', bySession || isGenieSession(req)));
@@ -1480,6 +1554,7 @@ const server = http.createServer((req, res) => {
             }
 
             deleteAllLogo();
+            clearJSPatch(); // paksa re-patch app.js (tidak ada logo lagi)
             auditLog('RESET', ip, 'Logo direset ke default');
             sendSecure(res, 200, 'text/html; charset=utf-8',
                 uploadPage('<div class="msg ok">✅ Logo direset ke logo default.</div>', authed));
@@ -1502,11 +1577,6 @@ const server = http.createServer((req, res) => {
     //   /public/logo-<hash>.svg
     // Tangkap semua path yang ada kata "logo" di bawah /public/
     // dengan ekstensi gambar apapun.
-    // Log semua request /public/ untuk deteksi URL logo asli GenieACS
-    if (/\/public\//i.test(req.url)) {
-        console.log(`[public] ${req.url}`);
-    }
-
     const isLogoReq = /\/public\/[^/]*logo[^/]*\.(svg|png|jpe?g|gif|webp|ico|bmp)/i.test(req.url);
     if (isLogoReq) {
         const custom = findCustomLogo();
