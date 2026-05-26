@@ -1109,16 +1109,17 @@ function buildLogoReplacerScript(ts, origH) {
     img.removeAttribute('height');
   }
 
-  // Perbaiki layout versi: buat parent (div.logo) flex-column,
-  // versi tampil sebagai block di BAWAH img — bukan inline di text baseline.
+  // Perbaiki layout versi: div.logo → inline-flex ROW,
+  // versi muncul di KANAN logo (berdampingan), tetap dalam nav bar.
   // Dari diagnostik: parent = DIV.logo, versi = span.version
   function fixVersion(img){
     var par=img.parentElement; if(!par) return;
 
-    // div.logo → flex column: img di atas, versi di bawah
+    // div.logo → inline-flex row: [logo] [v1.2.16] dalam satu baris
     par.style.cssText=(par.getAttribute('style')||'')+
-      ';display:inline-flex!important;flex-direction:column!important;'+
-      'align-items:flex-start!important;vertical-align:middle!important;';
+      ';display:inline-flex!important;flex-direction:row!important;'+
+      'align-items:center!important;vertical-align:middle!important;'+
+      'flex-wrap:nowrap!important;';
 
     var nodes=Array.prototype.slice.call(par.childNodes);
     for(var i=0;i<nodes.length;i++){
@@ -1128,21 +1129,20 @@ function buildLogoReplacerScript(ts, origH) {
         if(n.getAttribute('data-rf-v')) continue;
         if(/v\d+\.\d+/.test(n.textContent||'')){
           n.setAttribute('data-rf-v','1');
-          // Pastikan ada di BAWAH img dalam flex column
+          // Pindah ke KANAN img (setelah img dalam flex row)
           par.insertBefore(n, img.nextSibling);
-          // display:block agar jadi baris sendiri di flex column
-          n.style.cssText='position:static!important;display:block!important;'+
-            'font-size:0.6em!important;color:#666!important;'+
-            'line-height:1.2!important;margin:1px 0 0 0!important;'+
-            'inset:auto!important;white-space:nowrap!important;';
+          n.style.cssText='position:static!important;display:inline!important;'+
+            'font-size:0.6em!important;color:#888!important;'+
+            'margin-left:6px!important;white-space:nowrap!important;'+
+            'inset:auto!important;line-height:1!important;vertical-align:middle!important;';
         }
       } else if(n.nodeType===3){ // text node
         if(!/v\d+\.\d+/.test(n.nodeValue||'')) continue;
         var sp=document.createElement('span');
         sp.setAttribute('data-rf-v','1');
-        sp.style.cssText='position:static!important;display:block!important;'+
-          'font-size:0.6em!important;color:#666!important;'+
-          'line-height:1.2!important;margin:1px 0 0 0!important;white-space:nowrap!important;';
+        sp.style.cssText='position:static!important;display:inline!important;'+
+          'font-size:0.6em!important;color:#888!important;'+
+          'margin-left:6px!important;white-space:nowrap!important;vertical-align:middle!important;';
         sp.textContent=n.nodeValue.trim();
         par.removeChild(n);
         par.insertBefore(sp, img.nextSibling);

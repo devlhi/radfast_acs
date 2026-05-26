@@ -1,5 +1,5 @@
 /**
- * Simulasi fixVersion() — inline-flex column approach
+ * Simulasi fixVersion() — inline-flex ROW approach (versi di KANAN logo)
  * Jalankan: node test-fix.js
  */
 'use strict';
@@ -8,9 +8,11 @@ const { JSDOM } = require('jsdom');
 // ── fungsi yang akan ditest (mirror persis dari logo-proxy.js) ──────────
 function fixVersionFn(doc, img) {
     var par = img.parentElement; if (!par) return;
+    // div.logo → inline-flex row: [logo] [v1.2.16] berdampingan dalam nav bar
     par.style.cssText = (par.getAttribute('style') || '') +
-        ';display:inline-flex!important;flex-direction:column!important;' +
-        'align-items:flex-start!important;vertical-align:middle!important;';
+        ';display:inline-flex!important;flex-direction:row!important;' +
+        'align-items:center!important;vertical-align:middle!important;' +
+        'flex-wrap:nowrap!important;';
     var nodes = Array.prototype.slice.call(par.childNodes);
     for (var i = 0; i < nodes.length; i++) {
         var n = nodes[i];
@@ -20,18 +22,18 @@ function fixVersionFn(doc, img) {
             if (/v\d+\.\d+/.test(n.textContent || '')) {
                 n.setAttribute('data-rf-v', '1');
                 par.insertBefore(n, img.nextSibling);
-                n.style.cssText = 'position:static!important;display:block!important;' +
-                    'font-size:0.6em!important;color:#666!important;' +
-                    'line-height:1.2!important;margin:1px 0 0 0!important;' +
-                    'inset:auto!important;white-space:nowrap!important;';
+                n.style.cssText = 'position:static!important;display:inline!important;' +
+                    'font-size:0.6em!important;color:#888!important;' +
+                    'margin-left:6px!important;white-space:nowrap!important;' +
+                    'inset:auto!important;line-height:1!important;vertical-align:middle!important;';
             }
         } else if (n.nodeType === 3) {
             if (!/v\d+\.\d+/.test(n.nodeValue || '')) continue;
             var sp = doc.createElement('span');
             sp.setAttribute('data-rf-v', '1');
-            sp.style.cssText = 'position:static!important;display:block!important;' +
-                'font-size:0.6em!important;color:#666!important;' +
-                'line-height:1.2!important;margin:1px 0 0 0!important;white-space:nowrap!important;';
+            sp.style.cssText = 'position:static!important;display:inline!important;' +
+                'font-size:0.6em!important;color:#888!important;' +
+                'margin-left:6px!important;white-space:nowrap!important;vertical-align:middle!important;';
             sp.textContent = n.nodeValue.trim();
             par.removeChild(n);
             par.insertBefore(sp, img.nextSibling);
@@ -54,13 +56,13 @@ function runTest(name, html, expectVersionAfterImg) {
     const verIdx = verEl ? Array.from(par.childNodes).indexOf(verEl) : -1;
     const verAfterImg = verIdx > imgIdx;
 
-    // Cek 2: parent flex-column? (regex untuk toleransi spasi jsdom)
+    // Cek 2: parent inline-flex row? (regex untuk toleransi spasi jsdom)
     const parStyle = par.getAttribute('style') || '';
-    const hasFlex = /inline-flex/.test(parStyle) && /column/.test(parStyle);
+    const hasFlex = /inline-flex/.test(parStyle) && /row/.test(parStyle);
 
-    // Cek 3: versi display:block? (jsdom normalize ke "display: block !important" — pakai regex)
+    // Cek 3: versi display:inline? (jsdom normalize — pakai regex)
     const verStyle = verEl ? (verEl.getAttribute('style') || '') : '';
-    const hasBlock = /display\s*:\s*block/.test(verStyle);
+    const hasBlock = /display\s*:\s*inline/.test(verStyle);
 
     const verText = verEl ? verEl.textContent.trim() : '(tidak ditemukan)';
     const pass = verAfterImg === expectVersionAfterImg && !!verEl && hasFlex && hasBlock;
@@ -69,8 +71,8 @@ function runTest(name, html, expectVersionAfterImg) {
     console.log(`\n${mark} — ${name}`);
     console.log(`  Versi teks   : "${verText}"`);
     console.log(`  Posisi versi : index ${verIdx} (img di index ${imgIdx}) → ${verAfterImg ? 'SETELAH' : 'SEBELUM'} img`);
-    console.log(`  Parent flex? : ${hasFlex ? 'YA (inline-flex column)' : 'TIDAK — ' + parStyle.substring(0,80)}`);
-    console.log(`  Versi block? : ${hasBlock ? 'YA (display:block)' : 'TIDAK — ' + verStyle.substring(0,80)}`);
+    console.log(`  Parent flex? : ${hasFlex ? 'YA (inline-flex row)' : 'TIDAK — ' + parStyle.substring(0,80)}`);
+    console.log(`  Versi inline?: ${hasBlock ? 'YA (display:inline)' : 'TIDAK — ' + verStyle.substring(0,80)}`);
     console.log(`  DOM setelah  : ${par.innerHTML.replace(/\s+/g, ' ').trim().substring(0, 200)}`);
     return pass;
 }
