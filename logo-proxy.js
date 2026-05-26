@@ -1187,6 +1187,39 @@ function buildLogoReplacerScript(ts, origH) {
 
   window.addEventListener('load',fix);
   window.addEventListener('hashchange',function(){setTimeout(fix,150);});
+
+  // ── DIAGNOSA (aktif 1x setelah 2 detik) ─────────────────────
+  setTimeout(function(){
+    var img=findLogo();
+    if(!img){console.log('[RF-DIAG] findLogo: TIDAK DITEMUKAN');return;}
+    var par=img.parentElement;
+    console.log('[RF-DIAG] logo img src:',img.getAttribute('src'));
+    console.log('[RF-DIAG] parent tag+class:',par.tagName,'|',par.className,'| id:',par.id);
+    console.log('[RF-DIAG] grandparent tag+class:',par.parentElement?par.parentElement.tagName+' '+par.parentElement.className:'none');
+    var childs=Array.from(par.childNodes);
+    console.log('[RF-DIAG] isi parent ('+childs.length+' node):');
+    childs.forEach(function(n,i){
+      if(n.nodeType===1) console.log('  ['+i+'] ELEMENT <'+n.tagName.toLowerCase()+'> id='+n.id+' class='+n.className+' text="'+n.textContent.trim().substring(0,40)+'" style='+n.getAttribute('style'));
+      else if(n.nodeType===3&&n.nodeValue.trim()) console.log('  ['+i+'] TEXT "'+n.nodeValue.trim().substring(0,40)+'"');
+    });
+    // Cari teks versi di seluruh dokumen
+    var allEls=document.querySelectorAll('*');
+    for(var i=0;i<allEls.length;i++){
+      if(/^v\d+\.\d+\+/.test((allEls[i].textContent||'').trim().substring(0,20))){
+        var el=allEls[i];
+        if(el.children.length===0){
+          console.log('[RF-DIAG] versi ditemukan di:',el.tagName,'class='+el.className,'id='+el.id,'style='+el.getAttribute('style'));
+          var p=el.parentElement;
+          while(p&&p!==document.body){
+            console.log('  └ parent:',p.tagName,'class='+p.className,'id='+p.id);
+            p=p.parentElement;
+          }
+          break;
+        }
+      }
+    }
+  },2000);
+  // ─────────────────────────────────────────────────────────────
 })();
 </script>`;
 }
