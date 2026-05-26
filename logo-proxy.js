@@ -1050,11 +1050,15 @@ const COOKIE_WRAPPER = String.raw`<script>
 // Script ganti logo GenieACS via DOM.
 // Diinjeksi di awal <head> (sebelum app.js) agar MutationObserver aktif
 // sebelum Mithril render logo — logo custom muncul instant tanpa flash.
-function buildLogoReplacerScript(ts) {
+function buildLogoReplacerScript(ts, origH) {
+    // origH = tinggi logo asli dari _origSVG.h (px), 0 = pakai fallback
+    const safeH = (origH && origH > 0) ? Math.round(origH) : 0;
     return String.raw`<script>
 (function(){
   'use strict';
   var SRC='/__admin/logo/preview?t=${ts}';
+  // Tinggi logo asli GenieACS (dari viewBox). 0 = pakai fallback dinamis.
+  var LOGO_H=${safeH};
 
   function navHeight(){
     var NAV=['Overview','Devices','Faults','Admin'];
@@ -1082,7 +1086,21 @@ function buildLogoReplacerScript(ts) {
     return imgs[0]||null;
   }
 
-  function applySize(img,h){
+  function logoImgH(){
+    // Pakai tinggi logo asli (dari server) jika tersedia.
+    // Fallback: img.naturalHeight (dari SVG wrapper), lalu konstanta 30px.
+    if(LOGO_H>0) return LOGO_H;
+    var imgs=document.querySelectorAll('img');
+    for(var i=0;i<imgs.length;i++){
+      var s=imgs[i].getAttribute('src')||'';
+      if((s.indexOf('/public/')>=0||s.indexOf('/__admin/logo/')>=0)&&imgs[i].naturalHeight>0)
+        return imgs[i].naturalHeight;
+    }
+    return 30; // fallback aman (tinggi logo GenieACS asli ~30px)
+  }
+
+  function applySize(img){
+    var h=logoImgH();
     img.style.height=h+'px';
     img.style.width='auto';
     img.style.maxWidth='300px';
@@ -1094,14 +1112,15 @@ function buildLogoReplacerScript(ts) {
   function fix(){
     var img=findLogo();
     if(!img) return;
+    // Minimal cek nav ada (page sudah render)
+    if(navHeight()<10) return;
     var src=img.getAttribute('src')||'';
-    var h=navHeight(); if(h<10) return;
 
     if(src.indexOf('/__admin/logo/')>=0){
       // JS bundle patch sudah aktif — src benar, cukup set height sekali
       if(img.getAttribute('data-rf-h')) return;
       img.setAttribute('data-rf-h','1');
-      applySize(img,h);
+      applySize(img);
       return;
     }
 
@@ -1109,7 +1128,7 @@ function buildLogoReplacerScript(ts) {
     img.style.opacity='0';
     img.style.transition='';
     img.setAttribute('src',SRC);
-    applySize(img,h);
+    applySize(img);
     img.onload=function(){img.style.transition='opacity .15s';img.style.opacity='1';};
     img.onerror=function(){img.style.opacity='1';};
   }
@@ -1136,7 +1155,8 @@ function injectNavLink(html) {
     //   1. COOKIE_WRAPPER — harus sebelum app.js untuk cookie isolation
     //   2. Logo replacer — mulai MutationObserver SEBELUM Mithril render,
     //      sehingga logo custom muncul instant (tidak ada flash logo GenieACS)
-    const logoScript = findCustomLogo() ? buildLogoReplacerScript(Date.now()) : '';
+    const logoScript = findCustomLogo()
+        ? buildLogoReplacerScript(Date.now(), _origSVG ? _origSVG.h : 0) : '';
     const headInject = COOKIE_WRAPPER + logoScript;
 
     var headTag = html.match(/<head[^>]*>/i);
