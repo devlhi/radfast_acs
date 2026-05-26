@@ -1109,6 +1109,30 @@ function buildLogoReplacerScript(ts, origH) {
     img.removeAttribute('height');
   }
 
+  // Sembunyikan teks versi (v1.2.x) yang nabrak logo custom.
+  // Teks versi bisa berupa <span>/<small> ATAU text node — keduanya ditangani.
+  function hideVersion(img){
+    var par=img.parentElement; if(!par) return;
+    var nodes=Array.prototype.slice.call(par.childNodes);
+    for(var i=0;i<nodes.length;i++){
+      var n=nodes[i];
+      if(n===img) continue;
+      if(n.nodeType===1){ // element node
+        if(n.getAttribute('data-rf-v')) continue;
+        if(/v\d+\.\d+/.test(n.textContent||'')){
+          n.style.display='none'; n.setAttribute('data-rf-v','1');
+        }
+      } else if(n.nodeType===3){ // text node
+        if(!/v\d+\.\d+/.test(n.nodeValue||'')) continue;
+        // Bungkus text node dalam span tersembunyi
+        var sp=document.createElement('span');
+        sp.style.display='none'; sp.setAttribute('data-rf-v','1');
+        sp.textContent=n.nodeValue;
+        par.insertBefore(sp,n); par.removeChild(n);
+      }
+    }
+  }
+
   function fix(){
     var img=findLogo();
     if(!img) return;
@@ -1117,10 +1141,12 @@ function buildLogoReplacerScript(ts, origH) {
     var src=img.getAttribute('src')||'';
 
     if(src.indexOf('/__admin/logo/')>=0){
-      // JS bundle patch sudah aktif — src benar, cukup set height sekali
-      if(img.getAttribute('data-rf-h')) return;
-      img.setAttribute('data-rf-h','1');
-      applySize(img);
+      // JS bundle patch sudah aktif — src benar, set height + hide version
+      if(!img.getAttribute('data-rf-h')){
+        img.setAttribute('data-rf-h','1');
+        applySize(img);
+      }
+      hideVersion(img); // selalu jalankan — handle Mithril re-render versi teks
       return;
     }
 
@@ -1128,7 +1154,11 @@ function buildLogoReplacerScript(ts, origH) {
     img.style.opacity='0';
     img.style.transition='';
     img.setAttribute('src',SRC);
-    applySize(img);
+    if(!img.getAttribute('data-rf-h')){
+      img.setAttribute('data-rf-h','1');
+      applySize(img);
+    }
+    hideVersion(img);
     img.onload=function(){img.style.transition='opacity .15s';img.style.opacity='1';};
     img.onerror=function(){img.style.opacity='1';};
   }
