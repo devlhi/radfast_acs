@@ -1109,10 +1109,17 @@ function buildLogoReplacerScript(ts, origH) {
     img.removeAttribute('height');
   }
 
-  // Sembunyikan teks versi (v1.2.x) yang nabrak logo custom.
-  // Teks versi bisa berupa <span>/<small> ATAU text node — keduanya ditangani.
-  function hideVersion(img){
+  // Perbaiki posisi teks versi (v1.2.x) supaya tampil di bawah logo,
+  // bukan nabrak di atasnya. Override position:absolute kalau ada.
+  function fixVersion(img){
     var par=img.parentElement; if(!par) return;
+    // Jadikan container <a> flex-column: logo di atas, versi di bawah
+    par.style.display='inline-flex';
+    par.style.flexDirection='column';
+    par.style.alignItems='flex-start';
+    par.style.verticalAlign='middle';
+    par.style.lineHeight='1';
+
     var nodes=Array.prototype.slice.call(par.childNodes);
     for(var i=0;i<nodes.length;i++){
       var n=nodes[i];
@@ -1120,14 +1127,23 @@ function buildLogoReplacerScript(ts, origH) {
       if(n.nodeType===1){ // element node
         if(n.getAttribute('data-rf-v')) continue;
         if(/v\d+\.\d+/.test(n.textContent||'')){
-          n.style.display='none'; n.setAttribute('data-rf-v','1');
+          n.setAttribute('data-rf-v','1');
+          // Override absolute positioning, tampilkan sebagai block di bawah logo
+          n.style.position='static';
+          n.style.display='block';
+          n.style.fontSize='0.6em';
+          n.style.lineHeight='1.2';
+          n.style.marginTop='1px';
+          n.style.color='#888';
+          n.style.top='auto'; n.style.bottom='auto';
+          n.style.left='auto'; n.style.right='auto';
         }
-      } else if(n.nodeType===3){ // text node
+      } else if(n.nodeType===3){ // text node langsung
         if(!/v\d+\.\d+/.test(n.nodeValue||'')) continue;
-        // Bungkus text node dalam span tersembunyi
         var sp=document.createElement('span');
-        sp.style.display='none'; sp.setAttribute('data-rf-v','1');
-        sp.textContent=n.nodeValue;
+        sp.setAttribute('data-rf-v','1');
+        sp.style.cssText='display:block;font-size:0.6em;line-height:1.2;margin-top:1px;color:#888;position:static;';
+        sp.textContent=n.nodeValue.trim();
         par.insertBefore(sp,n); par.removeChild(n);
       }
     }
@@ -1141,12 +1157,12 @@ function buildLogoReplacerScript(ts, origH) {
     var src=img.getAttribute('src')||'';
 
     if(src.indexOf('/__admin/logo/')>=0){
-      // JS bundle patch sudah aktif — src benar, set height + hide version
+      // JS bundle patch sudah aktif — src benar, set height + fix version
       if(!img.getAttribute('data-rf-h')){
         img.setAttribute('data-rf-h','1');
         applySize(img);
       }
-      hideVersion(img); // selalu jalankan — handle Mithril re-render versi teks
+      fixVersion(img); // selalu jalankan — handle Mithril re-render versi teks
       return;
     }
 
@@ -1158,7 +1174,7 @@ function buildLogoReplacerScript(ts, origH) {
       img.setAttribute('data-rf-h','1');
       applySize(img);
     }
-    hideVersion(img);
+    fixVersion(img);
     img.onload=function(){img.style.transition='opacity .15s';img.style.opacity='1';};
     img.onerror=function(){img.style.opacity='1';};
   }
