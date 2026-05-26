@@ -1121,6 +1121,8 @@ function buildLogoReplacerScript(ts, origH) {
         if(n.getAttribute('data-rf-v')) continue;
         if(/v\d+\.\d+/.test(n.textContent||'')){
           n.setAttribute('data-rf-v','1');
+          // Pindahkan ke SESUDAH img (supaya tidak muncul sebelum logo)
+          par.insertBefore(n, img.nextSibling);
           n.style.cssText='position:static!important;display:inline!important;'+
             'font-size:0.65em!important;vertical-align:middle!important;'+
             'color:#666!important;margin-left:4px!important;'+
@@ -1135,7 +1137,9 @@ function buildLogoReplacerScript(ts, origH) {
           'font-size:0.65em!important;vertical-align:middle!important;'+
           'color:#666!important;margin-left:4px!important;white-space:nowrap!important;';
         sp.textContent=n.nodeValue.trim();
-        par.insertBefore(sp,n); par.removeChild(n);
+        par.removeChild(n);
+        // Pindahkan ke SESUDAH img (bukan posisi text node asli)
+        par.insertBefore(sp, img.nextSibling);
       }
     }
   }
