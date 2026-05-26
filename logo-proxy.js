@@ -1149,7 +1149,8 @@ function injectNavLink(html) {
 //  logo custom kita → logo muncul native tanpa DOM injection.
 //  Cache in-memory dengan ETag; clear saat logo baru diupload.
 // ════════════════════════════════════════════════════════════
-let _jsPatch = null; // { buf: Buffer, etag: string }
+let _jsPatch   = null;    // { buf: Buffer, etag: string }
+let _origSVG   = null;    // { w, h, viewBox } dimensi SVG asli GenieACS
 
 function clearJSPatch() {
     _jsPatch = null;
@@ -1157,23 +1158,67 @@ function clearJSPatch() {
 }
 
 function patchLogoInJS(jsStr) {
-    const logoPath = findCustomLogo();
-    if (!logoPath) return null;
+    if (!findCustomLogo()) return null;
 
-    // Ganti semua SVG data URI di bundle (logo GenieACS) dengan URL proxy kita.
-    // Min 200 char base64 agar tidak mengganti ikon kecil.
-    const svgRe = /data:image\/svg\+xml;base64,[A-Za-z0-9+/=]{200,}/g;
+    const svgRe = /data:image\/svg\+xml;base64,([A-Za-z0-9+/=]{200,})/g;
     let n = 0;
-    const patched = jsStr.replace(svgRe, () => {
+    const ts = Date.now();
+    const patched = jsStr.replace(svgRe, (_, b64) => {
         n++;
-        return `/__admin/logo/preview?t=${Date.now()}`;
+        // Ambil dimensi SVG asli dari match pertama (logo utama)
+        if (n === 1 && !_origSVG) {
+            try {
+                const svgTxt = Buffer.from(b64, 'base64').toString('utf-8');
+                const vb  = svgTxt.match(/viewBox\s*=\s*["']([^"']+)["']/i);
+                const w   = svgTxt.match(/<svg[^>]+\bwidth\s*=\s*["']([^"'%]+)["']/i);
+                const h   = svgTxt.match(/<svg[^>]+\bheight\s*=\s*["']([^"'%]+)["']/i);
+                if (vb || (w && h)) {
+                    const parts = vb ? vb[1].trim().split(/\s+/).map(Number) : null;
+                    _origSVG = {
+                        viewBox : vb  ? vb[1]  : `0 0 ${w[1]} ${h[1]}`,
+                        w       : w   ? w[1]   : (parts ? parts[2] : null),
+                        h       : h   ? h[1]   : (parts ? parts[3] : null)
+                    };
+                    console.log(`[logo-patch] Dimensi SVG asli: ${JSON.stringify(_origSVG)}`);
+                }
+            } catch(e) { /* abaikan */ }
+        }
+        return `/__admin/logo/preview?t=${ts}`;
     });
-    if (n === 0) {
-        console.log('[logo-patch] Tidak ada SVG data URI ditemukan di bundle');
-        return null;
-    }
+    if (n === 0) { console.log('[logo-patch] Tidak ada SVG ditemukan di bundle'); return null; }
     console.log(`[logo-patch] ${n} SVG data URI diganti`);
     return patched;
+}
+
+// Buat SVG wrapper dengan dimensi SAMA seperti logo asli GenieACS.
+// Logo custom di-embed di dalamnya → CSS GenieACS tetap bekerja,
+// posisi teks versi, padding, dll. persis seperti logo asli.
+function buildLogoSVG(logoPath) {
+    try {
+        const data = fs.readFileSync(logoPath);
+        const ext  = path.extname(logoPath).toLowerCase();
+        const mime = MIME[ext] || 'image/png';
+        const b64  = data.toString('base64');
+
+        const vb   = (_origSVG && _origSVG.viewBox) || '0 0 250 40';
+        const parts = vb.trim().split(/\s+/).map(Number);
+        const W    = (_origSVG && _origSVG.w)       || parts[2] || 250;
+        const H    = (_origSVG && _origSVG.h)       || parts[3] || 40;
+
+        // Gunakan preserveAspectRatio xMidYMid meet → logo tetap proporsional
+        // dan terpusat dalam kotak yang sama dengan logo GenieACS asli
+        return Buffer.from(
+            `<?xml version="1.0" encoding="UTF-8"?>` +
+            `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"` +
+            ` viewBox="${vb}" width="${W}" height="${H}">` +
+            `<image href="data:${mime};base64,${b64}"` +
+            ` x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid meet"/>` +
+            `</svg>`,
+            'utf-8'
+        );
+    } catch(e) {
+        return null;
+    }
 }
 
 // ════════════════════════════════════════════════════════════
@@ -1343,13 +1388,26 @@ const server = http.createServer((req, res) => {
     if (url === '/__admin/logo/preview') {
         const f = findCustomLogo();
         if (f) {
-            const ext = path.extname(f).toLowerCase();
-            res.writeHead(200, {
-                'Content-Type'          : MIME[ext] || 'image/svg+xml',
-                'Cache-Control'         : 'no-store',
-                'X-Content-Type-Options': 'nosniff'
-            });
-            fs.createReadStream(f).pipe(res);
+            // Kalau sudah tahu dimensi SVG asli → bungkus dalam SVG wrapper
+            // agar ukuran & posisi sama persis dengan logo GenieACS asli
+            const svgBuf = buildLogoSVG(f);
+            if (svgBuf) {
+                res.writeHead(200, {
+                    'Content-Type'          : 'image/svg+xml',
+                    'Cache-Control'         : 'no-store',
+                    'X-Content-Type-Options': 'nosniff'
+                });
+                res.end(svgBuf);
+            } else {
+                // Fallback: serve file asli
+                const ext = path.extname(f).toLowerCase();
+                res.writeHead(200, {
+                    'Content-Type'          : MIME[ext] || 'image/svg+xml',
+                    'Cache-Control'         : 'no-store',
+                    'X-Content-Type-Options': 'nosniff'
+                });
+                fs.createReadStream(f).pipe(res);
+            }
         } else {
             res.writeHead(404); res.end();
         }
