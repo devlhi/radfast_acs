@@ -1109,17 +1109,10 @@ function buildLogoReplacerScript(ts, origH) {
     img.removeAttribute('height');
   }
 
-  // Perbaiki posisi teks versi (v1.2.x) supaya tampil di bawah logo,
-  // bukan nabrak di atasnya. Override position:absolute kalau ada.
+  // Perbaiki posisi teks versi (v1.2.x): tampil inline setelah logo (kanan),
+  // bukan mengambang di atas logo. Override position:absolute → static.
   function fixVersion(img){
     var par=img.parentElement; if(!par) return;
-    // Jadikan container <a> flex-column: logo di atas, versi di bawah
-    par.style.display='inline-flex';
-    par.style.flexDirection='column';
-    par.style.alignItems='flex-start';
-    par.style.verticalAlign='middle';
-    par.style.lineHeight='1';
-
     var nodes=Array.prototype.slice.call(par.childNodes);
     for(var i=0;i<nodes.length;i++){
       var n=nodes[i];
@@ -1128,21 +1121,19 @@ function buildLogoReplacerScript(ts, origH) {
         if(n.getAttribute('data-rf-v')) continue;
         if(/v\d+\.\d+/.test(n.textContent||'')){
           n.setAttribute('data-rf-v','1');
-          // Override absolute positioning, tampilkan sebagai block di bawah logo
-          n.style.position='static';
-          n.style.display='block';
-          n.style.fontSize='0.6em';
-          n.style.lineHeight='1.2';
-          n.style.marginTop='1px';
-          n.style.color='#888';
-          n.style.top='auto'; n.style.bottom='auto';
-          n.style.left='auto'; n.style.right='auto';
+          n.style.cssText='position:static!important;display:inline!important;'+
+            'font-size:0.65em!important;vertical-align:middle!important;'+
+            'color:#666!important;margin-left:4px!important;'+
+            'top:auto!important;bottom:auto!important;'+
+            'left:auto!important;right:auto!important;white-space:nowrap!important;';
         }
       } else if(n.nodeType===3){ // text node langsung
         if(!/v\d+\.\d+/.test(n.nodeValue||'')) continue;
         var sp=document.createElement('span');
         sp.setAttribute('data-rf-v','1');
-        sp.style.cssText='display:block;font-size:0.6em;line-height:1.2;margin-top:1px;color:#888;position:static;';
+        sp.style.cssText='position:static!important;display:inline!important;'+
+          'font-size:0.65em!important;vertical-align:middle!important;'+
+          'color:#666!important;margin-left:4px!important;white-space:nowrap!important;';
         sp.textContent=n.nodeValue.trim();
         par.insertBefore(sp,n); par.removeChild(n);
       }
