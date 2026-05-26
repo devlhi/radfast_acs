@@ -8,11 +8,12 @@ const { JSDOM } = require('jsdom');
 // ── fungsi yang akan ditest (mirror persis dari logo-proxy.js) ──────────
 function fixVersionFn(doc, img) {
     var par = img.parentElement; if (!par) return;
-    // div.logo → inline-flex column: [logo] di atas, [versi] di bawah
+    // div.logo: flex-column, align-self:flex-start → mulai dari TOP nav bar
     par.style.cssText = (par.getAttribute('style') || '') +
         ';display:inline-flex!important;flex-direction:column!important;' +
-        'align-items:flex-start!important;justify-content:center!important;' +
-        'vertical-align:middle!important;flex-wrap:nowrap!important;';
+        'align-items:flex-start!important;align-self:flex-start!important;' +
+        'justify-content:flex-start!important;vertical-align:top!important;' +
+        'flex-wrap:nowrap!important;overflow:visible!important;';
     var nodes = Array.prototype.slice.call(par.childNodes);
     for (var i = 0; i < nodes.length; i++) {
         var n = nodes[i];
@@ -23,17 +24,18 @@ function fixVersionFn(doc, img) {
                 n.setAttribute('data-rf-v', '1');
                 par.insertBefore(n, img.nextSibling);
                 n.style.cssText = 'position:static!important;display:block!important;' +
-                    'font-size:0.6em!important;color:#888!important;' +
-                    'margin:1px 0 0 0!important;white-space:nowrap!important;' +
-                    'inset:auto!important;line-height:1.2!important;';
+                    'font-size:0.6em!important;color:#555!important;' +
+                    'margin:0!important;padding:1px 0 0 2px!important;' +
+                    'white-space:nowrap!important;inset:auto!important;line-height:1.2!important;';
             }
         } else if (n.nodeType === 3) {
             if (!/v\d+\.\d+/.test(n.nodeValue || '')) continue;
             var sp = doc.createElement('span');
             sp.setAttribute('data-rf-v', '1');
             sp.style.cssText = 'position:static!important;display:block!important;' +
-                'font-size:0.6em!important;color:#888!important;' +
-                'margin:1px 0 0 0!important;white-space:nowrap!important;line-height:1.2!important;';
+                'font-size:0.6em!important;color:#555!important;' +
+                'margin:0!important;padding:1px 0 0 2px!important;' +
+                'white-space:nowrap!important;line-height:1.2!important;';
             sp.textContent = n.nodeValue.trim();
             par.removeChild(n);
             par.insertBefore(sp, img.nextSibling);
