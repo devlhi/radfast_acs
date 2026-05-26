@@ -1109,10 +1109,17 @@ function buildLogoReplacerScript(ts, origH) {
     img.removeAttribute('height');
   }
 
-  // Perbaiki posisi teks versi (v1.2.x): tampil inline setelah logo (kanan),
-  // bukan mengambang di atas logo. Override position:absolute → static.
+  // Perbaiki layout versi: buat parent (div.logo) flex-column,
+  // versi tampil sebagai block di BAWAH img — bukan inline di text baseline.
+  // Dari diagnostik: parent = DIV.logo, versi = span.version
   function fixVersion(img){
     var par=img.parentElement; if(!par) return;
+
+    // div.logo → flex column: img di atas, versi di bawah
+    par.style.cssText=(par.getAttribute('style')||'')+
+      ';display:inline-flex!important;flex-direction:column!important;'+
+      'align-items:flex-start!important;vertical-align:middle!important;';
+
     var nodes=Array.prototype.slice.call(par.childNodes);
     for(var i=0;i<nodes.length;i++){
       var n=nodes[i];
@@ -1121,24 +1128,23 @@ function buildLogoReplacerScript(ts, origH) {
         if(n.getAttribute('data-rf-v')) continue;
         if(/v\d+\.\d+/.test(n.textContent||'')){
           n.setAttribute('data-rf-v','1');
-          // Pindahkan ke SESUDAH img (supaya tidak muncul sebelum logo)
+          // Pastikan ada di BAWAH img dalam flex column
           par.insertBefore(n, img.nextSibling);
-          n.style.cssText='position:static!important;display:inline!important;'+
-            'font-size:0.65em!important;vertical-align:middle!important;'+
-            'color:#666!important;margin-left:4px!important;'+
-            'top:auto!important;bottom:auto!important;'+
-            'left:auto!important;right:auto!important;white-space:nowrap!important;';
+          // display:block agar jadi baris sendiri di flex column
+          n.style.cssText='position:static!important;display:block!important;'+
+            'font-size:0.6em!important;color:#666!important;'+
+            'line-height:1.2!important;margin:1px 0 0 0!important;'+
+            'inset:auto!important;white-space:nowrap!important;';
         }
-      } else if(n.nodeType===3){ // text node langsung
+      } else if(n.nodeType===3){ // text node
         if(!/v\d+\.\d+/.test(n.nodeValue||'')) continue;
         var sp=document.createElement('span');
         sp.setAttribute('data-rf-v','1');
-        sp.style.cssText='position:static!important;display:inline!important;'+
-          'font-size:0.65em!important;vertical-align:middle!important;'+
-          'color:#666!important;margin-left:4px!important;white-space:nowrap!important;';
+        sp.style.cssText='position:static!important;display:block!important;'+
+          'font-size:0.6em!important;color:#666!important;'+
+          'line-height:1.2!important;margin:1px 0 0 0!important;white-space:nowrap!important;';
         sp.textContent=n.nodeValue.trim();
         par.removeChild(n);
-        // Pindahkan ke SESUDAH img (bukan posisi text node asli)
         par.insertBefore(sp, img.nextSibling);
       }
     }
