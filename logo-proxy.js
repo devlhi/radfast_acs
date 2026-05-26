@@ -1076,27 +1076,40 @@ function buildLogoReplacerScript(ts) {
     var imgs=document.querySelectorAll('img');
     for(var i=0;i<imgs.length;i++){
       var s=imgs[i].getAttribute('src')||'';
-      if(s.indexOf('/public/')>=0) return imgs[i];
+      // Cari logo GenieACS: src dari /public/ (belum di-patch) ATAU /__admin/logo/ (sudah di-patch)
+      if(s.indexOf('/public/')>=0||s.indexOf('/__admin/logo/')>=0) return imgs[i];
     }
     return imgs[0]||null;
   }
 
-  function fix(){
-    var img=findLogo();
-    if(!img) return;
-    if((img.getAttribute('src')||'').indexOf('/__admin/logo/')>=0) return;
-    var h=navHeight(); if(h<10) return;
-
-    // Sembunyikan dulu, tampil lagi setelah custom logo selesai load
-    img.style.opacity='0';
-    img.style.transition='';
-    img.setAttribute('src',SRC);
+  function applySize(img,h){
     img.style.height=h+'px';
     img.style.width='auto';
     img.style.maxWidth='300px';
     img.style.objectFit='contain';
     img.removeAttribute('width');
     img.removeAttribute('height');
+  }
+
+  function fix(){
+    var img=findLogo();
+    if(!img) return;
+    var src=img.getAttribute('src')||'';
+    var h=navHeight(); if(h<10) return;
+
+    if(src.indexOf('/__admin/logo/')>=0){
+      // JS bundle patch sudah aktif — src benar, cukup set height sekali
+      if(img.getAttribute('data-rf-h')) return;
+      img.setAttribute('data-rf-h','1');
+      applySize(img,h);
+      return;
+    }
+
+    // JS bundle patch belum aktif / Mithril reset src — ganti src + set height
+    img.style.opacity='0';
+    img.style.transition='';
+    img.setAttribute('src',SRC);
+    applySize(img,h);
     img.onload=function(){img.style.transition='opacity .15s';img.style.opacity='1';};
     img.onerror=function(){img.style.opacity='1';};
   }
@@ -1104,9 +1117,9 @@ function buildLogoReplacerScript(ts) {
   // MutationObserver dimulai dari <head> — aktif sebelum Mithril render logo
   var obs=new MutationObserver(function(muts){
     for(var i=0;i<muts.length;i++){
-      var t=muts[i].target;
-      if(t.tagName==='IMG'){var s=t.getAttribute('src')||'';if(s&&s.indexOf('/__admin/logo/')<0){fix();return;}}
       if(muts[i].addedNodes.length){fix();return;}
+      var t=muts[i].target;
+      if(t.tagName==='IMG'){fix();return;}
     }
   });
   // Observe dari root agar tangkap saat <body> + logo dibuat Mithril
