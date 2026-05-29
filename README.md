@@ -134,12 +134,13 @@ radfast-add      # tambah instance/user baru
 radfast-list     # lihat semua instance + port
 radfast-status   # monitor CPU/RAM/disk + status service
 radfast-remove   # hapus 1 instance (termasuk database)
+radfast-remove-all # bersihkan SEMUA instance + service + registry + DB
 radfast-multi    # jalankan multi-proxy mode (semua instance dalam 1 proses Node.js)
 
 # bersihkan SEMUA instance + service + registry + DB
-sudo bash /opt/radfast_acs/remove-all.sh
+sudo radfast-remove-all
 # opsi: simpan DB
-sudo bash /opt/radfast_acs/remove-all.sh --keep-db
+sudo radfast-remove-all --keep-db
 ```
 
 ---
@@ -219,10 +220,10 @@ sudo systemctl restart genieacs-multi-proxy
 systemctl stop genieacs-alice-{cwmp,fs,nbi,ui}
 
 # Bersihkan SEMUA instance GenieACS (hapus DB)
-sudo bash /opt/radfast_acs/remove-all.sh
+sudo radfast-remove-all
 
 # Bersihkan SEMUA instance tapi simpan DB
-sudo bash /opt/radfast_acs/remove-all.sh --keep-db
+sudo radfast-remove-all --keep-db
 ```
 
 ---
