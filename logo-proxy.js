@@ -916,28 +916,28 @@ const NAV_INJECT = String.raw`<script>
 
   /* ── Posisikan tombol SEJAJAR dengan tab nav (Overview, dll) ── */
   /* MutationObserver handle Mithril re-render otomatis */
-  /* ── Posisikan tombol di KANAN logo, SEJAJAR vertikal dengan tab nav ── */
+  /* ── Posisikan tombol di KANAN tab Admin (paling kanan header) ── */
   function alignToNav(b){
-    var logo = document.querySelector('#header .logo');
-    var nav  = document.querySelector('#header a[href*="overview"]')
-            || document.querySelector('#header nav a')
-            || document.querySelector('#header a');
-    if(!logo || !nav){ b.style.display='none'; return; }
-    var lr = logo.getBoundingClientRect();
-    var nr = nav.getBoundingClientRect();
-    var btnH = nr.height || 22;
-    // Tampilkan dulu agar offsetWidth terukur
+    // Cari tab Admin (terakhir di nav)
+    var adminLink = document.querySelector('#header a[href*="admin"]');
+    if(!adminLink){
+      // Fallback: link terakhir di #header
+      var all = document.querySelectorAll('#header a');
+      adminLink = all.length ? all[all.length - 1] : null;
+    }
+    if(!adminLink){ b.style.display='none'; return; }
+    var ar = adminLink.getBoundingClientRect();
+    var btnH = ar.height || 22;
     b.style.opacity   = '0';
     b.style.display   = '';
     b.style.position  = 'fixed';
-    // Vertikal: sejajar dengan tab (bukan tengah logo)
-    b.style.top       = Math.round(nr.top + (nr.height - btnH) / 2) + 'px';
-    // Horizontal: tepat di kanan logo + 6px gap
-    b.style.left      = Math.round(lr.right + 6) + 'px';
+    // Vertikal: sejajar tengah tab Admin
+    b.style.top       = Math.round(ar.top + (ar.height - btnH) / 2) + 'px';
+    // Horizontal: 6px di kanan tab Admin
+    b.style.left      = Math.round(ar.right + 6) + 'px';
     b.style.right     = 'auto';
     b.style.height    = btnH + 'px';
     b.style.lineHeight= btnH + 'px';
-    // Tampilkan setelah posisi dihitung
     b.style.opacity   = '1';
   }
 
