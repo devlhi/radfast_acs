@@ -187,19 +187,14 @@ done
 
 # Proxy publik + logo upload sekarang SELALU pakai multi-proxy.
 # Tidak ada lagi service genieacs-<user>-proxy per instance.
-if [[ -z "$PROXY_SCRIPT" ]]; then
-    warn "logo-proxy.js tidak ditemukan — multi-proxy tetap dibuat, tapi fitur logo/proxy bisa gagal"
-fi
+[[ -z "$PROXY_SCRIPT" ]] && error "logo-proxy.js tidak ditemukan — multi-proxy tidak bisa berjalan"
 
 MULTI_SCRIPT="$REPO_DIR/multi-proxy.js"
-if [[ ! -f "$MULTI_SCRIPT" ]]; then
-    warn "multi-proxy.js tidak ditemukan di $MULTI_SCRIPT"
-fi
+[[ ! -f "$MULTI_SCRIPT" ]] && error "multi-proxy.js tidak ditemukan di $MULTI_SCRIPT"
 
 MULTI_SERVICE_FILE="/etc/systemd/system/genieacs-multi-proxy.service"
-if [[ ! -f "$MULTI_SERVICE_FILE" ]]; then
-    info "Membuat service genieacs-multi-proxy (mode wajib)..."
-    cat > "$MULTI_SERVICE_FILE" <<EOF
+info "Menulis service genieacs-multi-proxy (mode wajib)..."
+cat > "$MULTI_SERVICE_FILE" <<EOF
 [Unit]
 Description=RadFast ACS Multi-Instance Logo Proxy
 After=network.target
@@ -209,7 +204,7 @@ Type=simple
 Environment=NODE_ENV=production
 Environment=RADFAST_INSTANCES_DIR=${INSTANCES_DIR}
 Environment=RADFAST_REGISTRY=${REGISTRY}
-Environment=RADFAST_PROXY_SCRIPT=${PROXY_SCRIPT:-$REPO_DIR/logo-proxy.js}
+Environment=RADFAST_PROXY_SCRIPT=${PROXY_SCRIPT}
 ExecStart=${NODE_BIN} ${MULTI_SCRIPT}
 Restart=on-failure
 RestartSec=5
@@ -221,8 +216,7 @@ LimitNOFILE=65536
 [Install]
 WantedBy=multi-user.target
 EOF
-    success "Service genieacs-multi-proxy dibuat"
-fi
+success "Service genieacs-multi-proxy siap"
 
 # Bersihkan SEMUA service proxy per-instance lama (legacy mode)
 info "Membersihkan proxy per-instance lama..."
