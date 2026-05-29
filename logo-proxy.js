@@ -26,7 +26,17 @@ const GENIE_PORT   = parseInt(process.env.RADFAST_UI_INTERNAL      || 13001);
 const NBI_PORT     = parseInt(process.env.GENIEACS_NBI_PORT        || 7558);
 // Secret path untuk akses NBI (REST API GenieACS) lewat port UI publik ini.
 // Kosong = gate NBI nonaktif. Di-set per instance via .env (RADFAST_NBI_GATE_PATH).
-const NBI_GATE_PATH = (process.env.RADFAST_NBI_GATE_PATH || '').trim().replace(/\/+$/, '');
+const NBI_GATE_PATH_INIT = (process.env.RADFAST_NBI_GATE_PATH || '').trim().replace(/\/+$/, '');
+// Batas maksimum perubahan secret via dashboard (0 = unlimited)
+const NBI_GATE_MAX_CHANGES = parseInt(process.env.RADFAST_NBI_GATE_MAX_CHANGES || '3', 10);
+// State runtime
+let nbiGateCurrentPath = NBI_GATE_PATH_INIT;
+let nbiGateOriginalPath = NBI_GATE_PATH_INIT;
+let nbiGateChangesLeft = NBI_GATE_MAX_CHANGES;
+// Agar route-check (if NBI_GATE_PATH ...) tetap jalan, kita pakai variabel
+// yang diupdate saat secret berubah — cukup alias ke current.
+let NBI_GATE_PATH = nbiGateCurrentPath;
+function refreshNbiGateConst() { NBI_GATE_PATH = nbiGateCurrentPath; }
 const LOGO_BASE    = process.env.RADFAST_LOGO_FILE                 || '/tmp/radfast-logo';
 const ADMIN_TOKEN  = process.env.RADFAST_ADMIN_TOKEN               || '';
 const JWT_SECRET   = process.env.GENIEACS_UI_JWT_SECRET            || '';
@@ -500,8 +510,84 @@ function uploadPage(msg = '', authed = false, csrfNonce = '') {
   </form>` : ''}
 
   <p class="note">⚡ Logo aktif langsung tanpa restart.</p>
+
+  <!-- NBI Secret Gate -->
+  <hr>
+  <h2 style="margin-top:14px">🔐 NBI Secret Gate (REST API)</h2>
+  <div style="font-size:13px;color:#444;margin:6px 0 10px">Akses API publik hanya lewat path rahasia ini. Tanpa path → tidak bisa akses /devices dkk.</div>
+  <div style="background:#f7f9fb;border:1px solid #e1e8ef;border-radius:8px;padding:12px;width:100%;margin-bottom:10px">
+    <div style="font-size:12px;color:#666;margin-bottom:6px">URL API saat ini (untuk GoRadius / Billing)</div>
+    <div id="nbi-url" style="font-family:monospace;font-size:13px;color:#111;word-break:break-all;background:#fff;padding:8px;border:1px solid #dce4ea;border-radius:4px">Memuat...</div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+    <div style="flex:1;min-width:240px">
+      <label style="display:block;font-size:12px;font-weight:bold;color:#555;margin-bottom:4px">🔑 Secret Path</label>
+      <input id="nbi-secret" type="text" readonly style="width:100%;padding:9px 10px;border:1px solid #ddd;border-radius:6px;font-family:monospace;font-size:13px;background:#fafafa">
+    </div>
+  </div>
+  <form id="nbi-form" autocomplete="off">
+    <label style="display:block;font-size:13px;font-weight:bold;color:#555;margin:10px 0 4px">🔑 Token Admin</label>
+    <input id="nbi-token" type="password" placeholder="Masukkan token admin" required autocomplete="new-password" style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;outline:none">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+      <button type="button" id="nbi-regen" style="flex:1;min-width:160px;padding:10px 20px;border:none;border-radius:6px;font-size:14px;font-weight:bold;cursor:pointer;background:#2980b9;color:#fff">🔄 Ganti Secret (3x)</button>
+      <button type="button" id="nbi-reset" style="flex:1;min-width:140px;padding:10px 20px;border:none;border-radius:6px;font-size:14px;font-weight:bold;cursor:pointer;background:#7f8c8d;color:#fff">♻ Reset ke Awal</button>
+    </div>
+    <div id="nbi-msg" style="margin-top:10px;padding:8px 12px;border-radius:6px;font-size:13px;display:none"></div>
+  </form>
+  <p class="note" style="margin-top:10px">ℹ️ Ganti 3× per restart server. Setelah itu hanya bisa direset dengan restart instance atau edit .env.</p>
+
   <a class="back" href="/">← Kembali ke Dashboard</a>
 </div>
+<script>
+(function(){
+  var tokenEl=document.getElementById('nbi-token');
+  var secretEl=document.getElementById('nbi-secret');
+  var urlEl=document.getElementById('nbi-url');
+  var regenBtn=document.getElementById('nbi-regen');
+  var resetBtn=document.getElementById('nbi-reset');
+  var msgEl=document.getElementById('nbi-msg');
+  function setMsg(type,text){msgEl.style.display='block';msgEl.style.background=type==='ok'?'#d4edda':'#f8d7da';msgEl.style.color=type==='ok'?'#155724':'#721c24';msgEl.style.border='1px solid '+(type==='ok'?'#c3e6cb':'#f5c6cb');msgEl.textContent=text;}
+  function clearMsg(){msgEl.style.display='none';msgEl.textContent='';}
+  function apiURL(path){return location.protocol+'//'+location.host+path;}
+  function loadInfo(){
+    clearMsg();
+    fetch('/__admin/api/nbi-key',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
+      body:JSON.stringify({token:tokenEl.value||'',action:'info'})
+    }).then(function(r){return r.json();}).then(function(d){
+      if(!d.ok){setMsg('er',d.error||'Gagal memuat info NBI');return;}
+      secretEl.value=d.secretPath||'(kosong)';
+      urlEl.textContent=d.secretPath?apiURL(d.secretPath):(location.protocol+'//'+location.host+'/ (NBI gate nonaktif)');
+      if(d.maxChanges>0){regenBtn.textContent='🔄 Ganti Secret (sisa '+d.changesLeft+'/'+d.maxChanges+')';regenBtn.disabled=d.changesLeft<=0;}else{regenBtn.textContent='🔄 Ganti Secret (unlimited)';regenBtn.disabled=false;}
+    }).catch(function(){
+      urlEl.textContent='Gagal memuat';
+      setMsg('er','Gagal mengambil info NBI. Isi token lalu coba lagi.');
+    });
+  }
+  regenBtn.addEventListener('click',function(){
+    clearMsg();
+    if(!tokenEl.value){setMsg('er','Isi token admin terlebih dahulu.');return;}
+    fetch('/__admin/api/nbi-key',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
+      body:JSON.stringify({token:tokenEl.value,action:'regenerate'})
+    }).then(function(r){return r.json();}).then(function(d){
+      if(!d.ok){setMsg('er',d.error||'Gagal generate secret baru');return;}
+      setMsg('ok','Secret berhasil diganti. Simpan URL baru di GoRadius / Billing.');
+      secretEl.value=d.secretPath;urlEl.textContent=apiURL(d.secretPath);loadInfo();
+    }).catch(function(){setMsg('er','Error koneksi saat generate.');});
+  });
+  resetBtn.addEventListener('click',function(){
+    clearMsg();
+    if(!tokenEl.value){setMsg('er','Isi token admin terlebih dahulu.');return;}
+    fetch('/__admin/api/nbi-key',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
+      body:JSON.stringify({token:tokenEl.value,action:'reset'})
+    }).then(function(r){return r.json();}).then(function(d){
+      if(!d.ok){setMsg('er',d.error||'Gagal reset secret');return;}
+      setMsg('ok','Secret direset ke awal.');
+      secretEl.value=d.secretPath;urlEl.textContent=d.secretPath?apiURL(d.secretPath):(location.protocol+'//'+location.host+'/ (NBI gate nonaktif)');loadInfo();
+    }).catch(function(){setMsg('er','Error koneksi saat reset.');});
+  });
+  loadInfo();
+})();
+</script>
 </body>
 </html>`;
 }
@@ -962,7 +1048,7 @@ const NAV_INJECT = String.raw`<script>
         'user-select:none;white-space:nowrap;cursor:pointer;' +
         'letter-spacing:0.3px;box-shadow:0 1px 3px rgba(0,0,0,.25);'
       );
-      btn.innerHTML='\u270E Ganti Logo';
+      btn.innerHTML='\u270E Logo & API';
       btn.addEventListener('click', function(e){
         e.preventDefault(); e.stopPropagation(); openModal();
       });
@@ -1411,6 +1497,71 @@ const server = http.createServer((req, res) => {
             sendSecure(res, 413, 'text/plain', 'Payload Too Large');
             return;
         }
+    }
+
+    // ── Admin API: lihat/ganti/reset NBI secret path ─────────
+    if (url === '/__admin/api/nbi-key' && req.method === 'POST') {
+        let raw = '';
+        req.on('data', c => { raw += c; if (raw.length > 4096) req.destroy(); });
+        req.on('end', () => {
+            try {
+                const data = JSON.parse(raw || '{}');
+                const token = String(data.token || '').trim();
+                const action = String(data.action || '').trim();
+                const authedBySession = isGenieSession(req);
+                const authedByToken = ADMIN_TOKEN && token === ADMIN_TOKEN;
+                if (!authedBySession && !authedByToken) {
+                    sendSecure(res, 401, 'application/json', JSON.stringify({ ok: false, error: 'Unauthorized (session/token)' }));
+                    return;
+                }
+
+                if (action === 'info') {
+                    sendSecure(res, 200, 'application/json', JSON.stringify({
+                        ok: true,
+                        secretPath: nbiGateCurrentPath,
+                        originalPath: nbiGateOriginalPath,
+                        changesLeft: nbiGateChangesLeft,
+                        maxChanges: NBI_GATE_MAX_CHANGES
+                    }));
+                    return;
+                }
+
+                if (action === 'reset') {
+                    nbiGateCurrentPath = nbiGateOriginalPath;
+                    nbiGateChangesLeft = NBI_GATE_MAX_CHANGES;
+                    refreshNbiGateConst();
+                    sendSecure(res, 200, 'application/json', JSON.stringify({
+                        ok: true,
+                        secretPath: nbiGateCurrentPath,
+                        changesLeft: nbiGateChangesLeft,
+                        maxChanges: NBI_GATE_MAX_CHANGES
+                    }));
+                    return;
+                }
+
+                if (action === 'regenerate') {
+                    if (NBI_GATE_MAX_CHANGES > 0 && nbiGateChangesLeft <= 0) {
+                        sendSecure(res, 400, 'application/json', JSON.stringify({ ok: false, error: 'Batas ganti secret sudah habis. Reset/restart instance untuk mengulang.' }));
+                        return;
+                    }
+                    nbiGateCurrentPath = `/_acs-${crypto.randomBytes(20).toString('hex')}`;
+                    if (NBI_GATE_MAX_CHANGES > 0) nbiGateChangesLeft--;
+                    refreshNbiGateConst();
+                    sendSecure(res, 200, 'application/json', JSON.stringify({
+                        ok: true,
+                        secretPath: nbiGateCurrentPath,
+                        changesLeft: nbiGateChangesLeft,
+                        maxChanges: NBI_GATE_MAX_CHANGES
+                    }));
+                    return;
+                }
+
+                sendSecure(res, 400, 'application/json', JSON.stringify({ ok: false, error: 'Action tidak dikenal' }));
+            } catch(e) {
+                sendSecure(res, 400, 'application/json', JSON.stringify({ ok: false, error: 'Request tidak valid' }));
+            }
+        });
+        return;
     }
 
     // ── NBI secure gate → teruskan ke REST API GenieACS ────
