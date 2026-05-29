@@ -595,11 +595,6 @@ const NAV_INJECT = String.raw`<script>
         'font-size:13px;display:none;}',
         '#rf-msg.ok{background:#dff0d8;color:#2d6a0f;border:1px solid #b8dca0;display:block;}',
         '#rf-msg.er{background:#f2dede;color:#8b1a1a;border:1px solid #e0b0b0;display:block;}',
-        // Logo + versi alignment: override inline-block→block agar versi sejajar
-        '#header>.logo{display:block!important;position:relative!important;vertical-align:top!important;}',
-        '#header>.logo>img{margin:10px!important;height:56px!important;width:auto!important;max-width:300px!important;object-fit:contain!important;vertical-align:top!important;}',
-        // Versi di pojok kanan bawah logo (default GenieACS), sejajar dengan img
-        '#header>.logo>.version{position:absolute!important;bottom:5px!important;right:10px!important;top:auto!important;font-family:monospace!important;font-size:10px!important;color:#666!important;line-height:1!important;white-space:nowrap!important;}'
       ].join('');
       document.head.appendChild(s);
     }
@@ -1114,89 +1109,31 @@ function buildLogoReplacerScript(ts, origH) {
     img.removeAttribute('height');
   }
 
-  // Versi di-handle CSS (#header>.logo>.version) — tidak perlu DOM manipulation.
-  // Cukup tandai sudah diproses agar tidak dipanggil ulang percuma.
+  // Versi sudah di-handle CSS (#header>.logo>.version) — tidak perlu manipulasi DOM.
   function fixVersion(img){
-    var par=img.parentElement;
-    if(!par) return;
     if(!img.getAttribute('data-rf-v')) img.setAttribute('data-rf-v','1');
   }
 
   function fix(){
     var img=findLogo();
-    if(!img) return;
-    // Minimal cek nav ada (page sudah render)
-    if(navHeight()<10) return;
+    if(!img||img.getAttribute('data-rf-h')) return; // sudah di-patch, skip
+    // Tunggu nav render (src /admin/logo sudah benar)
     var src=img.getAttribute('src')||'';
-
-    if(src.indexOf('/__admin/logo/')>=0){
-      // JS bundle patch sudah aktif — src benar, set height + fix version
-      if(!img.getAttribute('data-rf-h')){
-        img.setAttribute('data-rf-h','1');
-        applySize(img);
-      }
-      fixVersion(img);
-      return;
-    }
-
-    // JS bundle patch belum aktif / Mithril reset src — ganti src + set height
+    if(src.indexOf('/__admin/logo/')>=0) return;
+    // JS bundle patch belum aktif — ganti src + apply size
     img.style.opacity='0';
-    img.style.transition='';
     img.setAttribute('src',SRC);
-    if(!img.getAttribute('data-rf-h')){
-      img.setAttribute('data-rf-h','1');
-      applySize(img);
-    }
+    applySize(img);
     img.onload=function(){img.style.transition='opacity .15s';img.style.opacity='1';};
     img.onerror=function(){img.style.opacity='1';};
   }
 
-  // MutationObserver dimulai dari <head> — aktif sebelum Mithril render logo
-  var obs=new MutationObserver(function(muts){
-    for(var i=0;i<muts.length;i++){
-      if(muts[i].addedNodes.length){fix();return;}
-      var t=muts[i].target;
-      if(t.tagName==='IMG'){fix();return;}
-    }
-  });
-  // Observe dari root agar tangkap saat <body> + logo dibuat Mithril
-  obs.observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['src']});
-
-  window.addEventListener('load',fix);
-  window.addEventListener('hashchange',function(){setTimeout(fix,150);});
-
-  // ── DIAGNOSA (aktif 1x setelah 2 detik) ─────────────────────
-  setTimeout(function(){
-    var img=findLogo();
-    if(!img){console.log('[RF-DIAG] findLogo: TIDAK DITEMUKAN');return;}
-    var par=img.parentElement;
-    console.log('[RF-DIAG] logo img src:',img.getAttribute('src'));
-    console.log('[RF-DIAG] parent tag+class:',par.tagName,'|',par.className,'| id:',par.id);
-    console.log('[RF-DIAG] grandparent tag+class:',par.parentElement?par.parentElement.tagName+' '+par.parentElement.className:'none');
-    var childs=Array.from(par.childNodes);
-    console.log('[RF-DIAG] isi parent ('+childs.length+' node):');
-    childs.forEach(function(n,i){
-      if(n.nodeType===1) console.log('  ['+i+'] ELEMENT <'+n.tagName.toLowerCase()+'> id='+n.id+' class='+n.className+' text="'+n.textContent.trim().substring(0,40)+'" style='+n.getAttribute('style'));
-      else if(n.nodeType===3&&n.nodeValue.trim()) console.log('  ['+i+'] TEXT "'+n.nodeValue.trim().substring(0,40)+'"');
-    });
-    // Cari teks versi di seluruh dokumen
-    var allEls=document.querySelectorAll('*');
-    for(var i=0;i<allEls.length;i++){
-      if(/^v\d+\.\d+\+/.test((allEls[i].textContent||'').trim().substring(0,20))){
-        var el=allEls[i];
-        if(el.children.length===0){
-          console.log('[RF-DIAG] versi ditemukan di:',el.tagName,'class='+el.className,'id='+el.id,'style='+el.getAttribute('style'));
-          var p=el.parentElement;
-          while(p&&p!==document.body){
-            console.log('  └ parent:',p.tagName,'class='+p.className,'id='+p.id);
-            p=p.parentElement;
-          }
-          break;
-        }
-      }
-    }
-  },2000);
-  // ─────────────────────────────────────────────────────────────
+  // Observer hanya pantau childList pada <body> — sangat ringan
+  if(document.body){
+    new MutationObserver(function(){fix();}).observe(
+      document.body, {childList:true});
+  }
+  window.addEventListener('load',function(){setTimeout(fix,200);});
 })();
 </script>`;
 }
@@ -1204,11 +1141,16 @@ function buildLogoReplacerScript(ts, origH) {
 function injectNavLink(html) {
     // Inject di awal <head>:
     //   1. COOKIE_WRAPPER — harus sebelum app.js untuk cookie isolation
-    //   2. Logo replacer — mulai MutationObserver SEBELUM Mithril render,
-    //      sehingga logo custom muncul instant (tidak ada flash logo GenieACS)
+    //   2. Logo CSS — aktif dari awal page load, untuk sejajarkan logo+versi
+    //   3. Logo replacer — patch src logo (hanya 1x, tidak MutationObserver berat)
     const logoScript = findCustomLogo()
         ? buildLogoReplacerScript(Date.now(), _origSVG ? _origSVG.h : 0) : '';
-    const headInject = COOKIE_WRAPPER + logoScript;
+    const LOGO_CSS = findCustomLogo() ? `<style id="__rf-logo-css">
+#header>.logo                { display:inline-block!important;position:relative!important;padding-bottom:8px!important;vertical-align:top!important }
+#header>.logo>img            { margin:10px!important;margin-bottom:2px!important;height:56px!important;width:auto!important;object-fit:contain!important;vertical-align:top!important }
+#header>.logo>.version      { position:absolute!important;bottom:0!important;left:12px!important;right:auto!important;top:auto!important;font-family:monospace!important;font-size:10px!important;color:#666!important;line-height:1!important;white-space:nowrap!important }
+</style>` : '';
+    const headInject = COOKIE_WRAPPER + LOGO_CSS + logoScript;
 
     var headTag = html.match(/<head[^>]*>/i);
     if (headTag) {
@@ -1235,10 +1177,12 @@ function injectNavLink(html) {
 // ════════════════════════════════════════════════════════════
 let _jsPatch   = null;    // { buf: Buffer, etag: string }
 let _origSVG   = null;    // { w, h, viewBox } dimensi SVG asli GenieACS
+let _svgPreview = { buf: null, tag: null };  // cache preview SVG logo
 
 function clearJSPatch() {
     _jsPatch = null;
-    console.log('[logo-patch] JS patch cache cleared');
+    _svgPreview = { buf: null, tag: null };  // clear preview cache juga
+    console.log('[logo-patch] JS patch + preview cache cleared');
 }
 
 function patchLogoInJS(jsStr) {
@@ -1472,22 +1416,32 @@ const server = http.createServer((req, res) => {
     if (url === '/__admin/logo/preview') {
         const f = findCustomLogo();
         if (f) {
-            // Kalau sudah tahu dimensi SVG asli → bungkus dalam SVG wrapper
-            // agar ukuran & posisi sama persis dengan logo GenieACS asli
-            const svgBuf = buildLogoSVG(f);
-            if (svgBuf) {
+            // Cek cache server-side — kalau logo tidak berubah, skip buildLogoSVG
+            if (!_svgPreview.buf) {
+                _svgPreview.buf = buildLogoSVG(f);
+                if (_svgPreview.buf) _svgPreview.tag = crypto.createHash('md5').update(_svgPreview.buf).digest('hex').slice(0, 12);
+            }
+            if (_svgPreview.buf) {
+                const inm = req.headers['if-none-match'];
+                if (inm && inm === ('"rf-' + _svgPreview.tag + '"')) {
+                    res.writeHead(304, { 'Cache-Control': 'max-age=5', 'ETag': '"rf-' + _svgPreview.tag + '"' });
+                    return res.end();
+                }
                 res.writeHead(200, {
                     'Content-Type'          : 'image/svg+xml',
-                    'Cache-Control'         : 'no-store',
+                    'Cache-Control'         : 'max-age=5, must-revalidate',
+                    'ETag'                  : '"rf-' + _svgPreview.tag + '"',
                     'X-Content-Type-Options': 'nosniff'
                 });
-                res.end(svgBuf);
+                return res.end(_svgPreview.buf);
             } else {
                 // Fallback: serve file asli
                 const ext = path.extname(f).toLowerCase();
+                const tag2 = crypto.createHash('md5').update(String(fs.statSync(f).mtimeMs)).digest('hex').slice(0,8);
                 res.writeHead(200, {
                     'Content-Type'          : MIME[ext] || 'image/svg+xml',
-                    'Cache-Control'         : 'no-store',
+                    'Cache-Control'         : 'max-age=5, must-revalidate',
+                    'ETag'                  : '"rf-' + tag2 + '"',
                     'X-Content-Type-Options': 'nosniff'
                 });
                 fs.createReadStream(f).pipe(res);
