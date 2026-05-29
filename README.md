@@ -133,8 +133,13 @@ Setiap instance punya tombol **"Ganti Logo Klik"** (merah) di navbar dashboard.
 radfast-add      # tambah instance/user baru
 radfast-list     # lihat semua instance + port
 radfast-status   # monitor CPU/RAM/disk + status service
-radfast-remove   # hapus instance (termasuk database)
+radfast-remove   # hapus 1 instance (termasuk database)
 radfast-multi    # jalankan multi-proxy mode (semua instance dalam 1 proses Node.js)
+
+# bersihkan SEMUA instance + service + registry + DB
+sudo bash /opt/radfast_acs/remove-all.sh
+# opsi: simpan DB
+sudo bash /opt/radfast_acs/remove-all.sh --keep-db
 ```
 
 ---
@@ -146,7 +151,8 @@ radfast-multi    # jalankan multi-proxy mode (semua instance dalam 1 proses Node
 ├── logo-proxy.js               ← Proxy engine (dipanggil multi-proxy.js)
 ├── multi-proxy.js              ← Semua proxy dalam 1 proses Node.js
 ├── add-instance.sh             ← Tambah instance baru
-└── remove-instance.sh          ← Hapus instance
+├── remove-instance.sh          ← Hapus 1 instance
+└── remove-all.sh               ← Bersihkan semua instance (opsional keep DB)
 /opt/genieacs-app/              ← App GenieACS (shared, 1 copy)
 /opt/genieacs-instances/
 ├── .registry                   ← Daftar semua instance
@@ -211,6 +217,12 @@ sudo systemctl restart genieacs-multi-proxy
 
 # Stop semua service 1 instance
 systemctl stop genieacs-alice-{cwmp,fs,nbi,ui}
+
+# Bersihkan SEMUA instance GenieACS (hapus DB)
+sudo bash /opt/radfast_acs/remove-all.sh
+
+# Bersihkan SEMUA instance tapi simpan DB
+sudo bash /opt/radfast_acs/remove-all.sh --keep-db
 ```
 
 ---
