@@ -510,84 +510,8 @@ function uploadPage(msg = '', authed = false, csrfNonce = '') {
   </form>` : ''}
 
   <p class="note">⚡ Logo aktif langsung tanpa restart.</p>
-
-  <!-- NBI Secret Gate -->
-  <hr>
-  <h2 style="margin-top:14px">🔐 NBI Secret Gate (REST API)</h2>
-  <div style="font-size:13px;color:#444;margin:6px 0 10px">Akses API publik hanya lewat path rahasia ini. Tanpa path → tidak bisa akses /devices dkk.</div>
-  <div style="background:#f7f9fb;border:1px solid #e1e8ef;border-radius:8px;padding:12px;width:100%;margin-bottom:10px">
-    <div style="font-size:12px;color:#666;margin-bottom:6px">URL API saat ini (untuk GoRadius / Billing)</div>
-    <div id="nbi-url" style="font-family:monospace;font-size:13px;color:#111;word-break:break-all;background:#fff;padding:8px;border:1px solid #dce4ea;border-radius:4px">Memuat...</div>
-  </div>
-  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-    <div style="flex:1;min-width:240px">
-      <label style="display:block;font-size:12px;font-weight:bold;color:#555;margin-bottom:4px">🔑 Secret Path</label>
-      <input id="nbi-secret" type="text" readonly style="width:100%;padding:9px 10px;border:1px solid #ddd;border-radius:6px;font-family:monospace;font-size:13px;background:#fafafa">
-    </div>
-  </div>
-  <form id="nbi-form" autocomplete="off">
-    <label style="display:block;font-size:13px;font-weight:bold;color:#555;margin:10px 0 4px">🔑 Token Admin</label>
-    <input id="nbi-token" type="password" placeholder="Masukkan token admin" required autocomplete="new-password" style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;outline:none">
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
-      <button type="button" id="nbi-regen" style="flex:1;min-width:160px;padding:10px 20px;border:none;border-radius:6px;font-size:14px;font-weight:bold;cursor:pointer;background:#2980b9;color:#fff">🔄 Ganti Secret (3x)</button>
-      <button type="button" id="nbi-reset" style="flex:1;min-width:140px;padding:10px 20px;border:none;border-radius:6px;font-size:14px;font-weight:bold;cursor:pointer;background:#7f8c8d;color:#fff">♻ Reset ke Awal</button>
-    </div>
-    <div id="nbi-msg" style="margin-top:10px;padding:8px 12px;border-radius:6px;font-size:13px;display:none"></div>
-  </form>
-  <p class="note" style="margin-top:10px">ℹ️ Ganti 3× per restart server. Setelah itu hanya bisa direset dengan restart instance atau edit .env.</p>
-
   <a class="back" href="/">← Kembali ke Dashboard</a>
 </div>
-<script>
-(function(){
-  var tokenEl=document.getElementById('nbi-token');
-  var secretEl=document.getElementById('nbi-secret');
-  var urlEl=document.getElementById('nbi-url');
-  var regenBtn=document.getElementById('nbi-regen');
-  var resetBtn=document.getElementById('nbi-reset');
-  var msgEl=document.getElementById('nbi-msg');
-  function setMsg(type,text){msgEl.style.display='block';msgEl.style.background=type==='ok'?'#d4edda':'#f8d7da';msgEl.style.color=type==='ok'?'#155724':'#721c24';msgEl.style.border='1px solid '+(type==='ok'?'#c3e6cb':'#f5c6cb');msgEl.textContent=text;}
-  function clearMsg(){msgEl.style.display='none';msgEl.textContent='';}
-  function apiURL(path){return location.protocol+'//'+location.host+path;}
-  function loadInfo(){
-    clearMsg();
-    fetch('/__admin/api/nbi-key',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
-      body:JSON.stringify({token:tokenEl.value||'',action:'info'})
-    }).then(function(r){return r.json();}).then(function(d){
-      if(!d.ok){setMsg('er',d.error||'Gagal memuat info NBI');return;}
-      secretEl.value=d.secretPath||'(kosong)';
-      urlEl.textContent=d.secretPath?apiURL(d.secretPath):(location.protocol+'//'+location.host+'/ (NBI gate nonaktif)');
-      if(d.maxChanges>0){regenBtn.textContent='🔄 Ganti Secret (sisa '+d.changesLeft+'/'+d.maxChanges+')';regenBtn.disabled=d.changesLeft<=0;}else{regenBtn.textContent='🔄 Ganti Secret (unlimited)';regenBtn.disabled=false;}
-    }).catch(function(){
-      urlEl.textContent='Gagal memuat';
-      setMsg('er','Gagal mengambil info NBI. Isi token lalu coba lagi.');
-    });
-  }
-  regenBtn.addEventListener('click',function(){
-    clearMsg();
-    if(!tokenEl.value){setMsg('er','Isi token admin terlebih dahulu.');return;}
-    fetch('/__admin/api/nbi-key',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
-      body:JSON.stringify({token:tokenEl.value,action:'regenerate'})
-    }).then(function(r){return r.json();}).then(function(d){
-      if(!d.ok){setMsg('er',d.error||'Gagal generate secret baru');return;}
-      setMsg('ok','Secret berhasil diganti. Simpan URL baru di GoRadius / Billing.');
-      secretEl.value=d.secretPath;urlEl.textContent=apiURL(d.secretPath);loadInfo();
-    }).catch(function(){setMsg('er','Error koneksi saat generate.');});
-  });
-  resetBtn.addEventListener('click',function(){
-    clearMsg();
-    if(!tokenEl.value){setMsg('er','Isi token admin terlebih dahulu.');return;}
-    fetch('/__admin/api/nbi-key',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
-      body:JSON.stringify({token:tokenEl.value,action:'reset'})
-    }).then(function(r){return r.json();}).then(function(d){
-      if(!d.ok){setMsg('er',d.error||'Gagal reset secret');return;}
-      setMsg('ok','Secret direset ke awal.');
-      secretEl.value=d.secretPath;urlEl.textContent=d.secretPath?apiURL(d.secretPath):(location.protocol+'//'+location.host+'/ (NBI gate nonaktif)');loadInfo();
-    }).catch(function(){setMsg('er','Error koneksi saat reset.');});
-  });
-  loadInfo();
-})();
-</script>
 </body>
 </html>`;
 }
@@ -997,8 +921,109 @@ const NAV_INJECT = String.raw`<script>
     var msg = bd.querySelector('#rf-msg');
     if(msg){ msg.className=''; msg.textContent=''; msg.style.display='none'; }
   }
+  var _apiModal = null;
+
   function closeModal(){
     if(_modal){ _modal.classList.remove('open'); }
+    if(_apiModal){ _apiModal.classList.remove('open'); _apiModal.style.display='none'; }
+  }
+
+  function apiUrlFromPath(path){ return location.protocol+'//'+location.host+(path||''); }
+  function apiMsg(el, cls, txt){
+    el.style.display='block';
+    el.style.background=cls==='ok'?'#dff0d8':'#f2dede';
+    el.style.color=cls==='ok'?'#2d6a0f':'#8b1a1a';
+    el.style.border='1px solid '+(cls==='ok'?'#b8dca0':'#e0b0b0');
+    el.textContent=txt;
+  }
+
+  function buildApiModal(){
+    if(_apiModal && document.body.contains(_apiModal)) return _apiModal;
+    // Pastikan style tombol ada walau modal logo belum pernah dibuka
+    if(!document.getElementById('rf-api-style')){
+      var st=document.createElement('style'); st.id='rf-api-style';
+      st.textContent='#rf-api-bd.open{display:flex!important}'+
+        '#rf-api-box .rf-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}'+
+        '#rf-api-box .rf-btn{padding:7px 16px;border:none;border-radius:3px;cursor:pointer;font-size:13px;font-weight:bold}'+
+        '#rf-api-box .rf-btn:disabled{opacity:.5;cursor:not-allowed}'+
+        '#rf-api-box .rf-rm{background:#c0392b;color:#fff}';
+      document.head.appendChild(st);
+    }
+    var bd=document.createElement('div'); bd.id='rf-api-bd';
+    bd.style.cssText='display:none;position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147483647;background:rgba(0,0,0,.5);align-items:center;justify-content:center;';
+    bd.addEventListener('click',function(e){ if(e.target===bd) closeModal(); });
+
+    var box=document.createElement('div'); box.id='rf-api-box';
+    box.style.cssText='background:#fff;border-radius:4px;width:560px;max-width:95vw;box-shadow:0 6px 32px rgba(0,0,0,.35);font-family:Arial,sans-serif;font-size:14px;overflow:hidden;';
+
+    var head=document.createElement('div');
+    head.style.cssText='background:#d4c89a;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #b8ae82;';
+    var title=document.createElement('h3'); title.textContent='API URL GenieACS (NBI)'; title.style.cssText='margin:0;font-size:15px;color:#333;';
+    var x=document.createElement('button'); x.innerHTML='&times;'; x.title='Tutup'; x.style.cssText='background:none;border:none;font-size:22px;cursor:pointer;color:#555;line-height:1;padding:0 2px;';
+    x.addEventListener('click',closeModal); head.appendChild(title); head.appendChild(x);
+
+    var body=document.createElement('div'); body.style.cssText='padding:16px;';
+    body.innerHTML = '<div id="rf-api-msg" style="display:none;padding:8px 10px;border-radius:3px;margin-bottom:10px;font-size:13px"></div>'+
+      '<div style="font-size:13px;color:#444;margin-bottom:10px">Cek dulu URL API yang aktif. URL ini yang dipakai di GoRadius / Billing.</div>'+
+      '<label style="display:block;font-size:12px;font-weight:bold;color:#555;margin-bottom:4px">URL API lengkap</label>'+
+      '<div id="rf-api-url" style="font-family:monospace;font-size:13px;word-break:break-all;background:#f7f9fb;border:1px solid #dce4ea;border-radius:4px;padding:9px;margin-bottom:10px">Belum dicek</div>'+
+      '<label style="display:block;font-size:12px;font-weight:bold;color:#555;margin-bottom:4px">Secret Path</label>'+
+      '<input id="rf-api-secret" readonly style="width:100%;box-sizing:border-box;font-family:monospace;font-size:13px;background:#fafafa;border:1px solid #ddd;border-radius:4px;padding:8px;margin-bottom:10px" value="Belum dicek">'+
+      '<label style="display:block;font-size:12px;font-weight:bold;color:#555;margin-bottom:4px">Token Admin (opsional kalau sudah login)</label>'+
+      '<input id="rf-api-token" type="password" autocomplete="new-password" placeholder="Isi token jika belum terbaca dari session" style="width:100%;box-sizing:border-box;border:1px solid #ddd;border-radius:4px;padding:8px;margin-bottom:10px">'+
+      '<div class="rf-row">'+
+        '<button id="rf-api-check" class="rf-btn rf-ok" style="background:#5a8a2a;color:#fff">✓ Cek URL</button>'+
+        '<button id="rf-api-change" class="rf-btn" style="background:#2980b9;color:#fff">🔄 Ganti Secret</button>'+
+        '<button id="rf-api-reset" class="rf-btn rf-rm">♻ Reset</button>'+
+      '</div>'+
+      '<div id="rf-api-note" style="font-size:12px;color:#888;margin-top:10px;line-height:1.4">Ganti secret maksimal 3× per restart instance. Setelah secret diganti, update URL ini di GoRadius.</div>';
+
+    box.appendChild(head); box.appendChild(body); bd.appendChild(box);
+    var msg=body.querySelector('#rf-api-msg');
+    var url=body.querySelector('#rf-api-url');
+    var secret=body.querySelector('#rf-api-secret');
+    var token=body.querySelector('#rf-api-token');
+    var check=body.querySelector('#rf-api-check');
+    var change=body.querySelector('#rf-api-change');
+    var reset=body.querySelector('#rf-api-reset');
+
+    function call(action){
+      return fetch('/__admin/api/nbi-key',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:action,token:token.value||''})}).then(function(r){return r.json();});
+    }
+    function render(d){
+      if(!d.ok){ apiMsg(msg,'er',d.error||'Gagal cek API URL'); return; }
+      secret.value=d.secretPath||'(NBI gate nonaktif)';
+      url.textContent=d.secretPath?apiUrlFromPath(d.secretPath):'(NBI gate nonaktif)';
+      change.disabled=(d.maxChanges>0 && d.changesLeft<=0);
+      change.textContent=d.maxChanges>0?'🔄 Ganti Secret (sisa '+d.changesLeft+'/'+d.maxChanges+')':'🔄 Ganti Secret';
+      apiMsg(msg,'ok','URL berhasil dicek. Salin URL ini ke GoRadius / Billing.');
+    }
+    function checkInfo(){
+      msg.style.display='none'; url.textContent='Mengecek...'; secret.value='Mengecek...';
+      call('info').then(render).catch(function(){apiMsg(msg,'er','Gagal cek URL API. Cek koneksi/session.');});
+    }
+    check.addEventListener('click',function(e){ e.preventDefault(); checkInfo(); });
+    change.addEventListener('click',function(e){
+      e.preventDefault();
+      if(!confirm('Ganti secret NBI? URL lama langsung tidak berlaku.')) return;
+      call('regenerate').then(function(d){ render(d); if(d.ok) apiMsg(msg,'ok','Secret diganti. Update URL baru ini di GoRadius.'); }).catch(function(){apiMsg(msg,'er','Gagal ganti secret.');});
+    });
+    reset.addEventListener('click',function(e){
+      e.preventDefault();
+      if(!confirm('Reset secret ke nilai awal dari .env?')) return;
+      call('reset').then(function(d){ render(d); if(d.ok) apiMsg(msg,'ok','Secret direset ke awal.'); }).catch(function(){apiMsg(msg,'er','Gagal reset secret.');});
+    });
+    bd._rfCheckInfo = checkInfo;
+    _apiModal=bd;
+    return bd;
+  }
+
+  function openApiModal(){
+    var bd=buildApiModal();
+    if(!document.body.contains(bd)) document.body.appendChild(bd);
+    bd.classList.add('open');
+    bd.style.display='flex';
+    if(bd._rfCheckInfo) bd._rfCheckInfo();
   }
 
   /* ESC key */
@@ -1023,8 +1048,8 @@ const NAV_INJECT = String.raw`<script>
     b.style.position  = 'fixed';
     // Vertikal: sejajar tengah tab Admin
     b.style.top       = Math.round(ar.top + (ar.height - btnH) / 2) + 'px';
-    // Horizontal: 6px di kanan tab Admin
-    b.style.left      = Math.round(ar.right + 6) + 'px';
+    // Horizontal: offset di kanan tab Admin (offsetPx untuk tombol kedua)
+    b.style.left      = Math.round(ar.right + 6 + (b._rfOffset || 0)) + 'px';
     b.style.right     = 'auto';
     b.style.height    = btnH + 'px';
     b.style.lineHeight= btnH + 'px';
@@ -1032,10 +1057,13 @@ const NAV_INJECT = String.raw`<script>
   }
 
   function syncBtn(){
-    var onLogin = !!document.querySelector('input[type="password"]');
+    // Deteksi halaman login GenieACS, abaikan field password milik modal kita
+    var onLogin = !!document.querySelector('input[type="password"]:not(#rf-api-token):not(#rf-finput)');
     var btn = document.getElementById('rf-nav-btn');
+    var apiBtn = document.getElementById('rf-nav-api');
     if(onLogin){
       if(btn) btn.style.display='none';
+      if(apiBtn) apiBtn.style.display='none';
       return;
     }
     if(!btn){
@@ -1048,13 +1076,34 @@ const NAV_INJECT = String.raw`<script>
         'user-select:none;white-space:nowrap;cursor:pointer;' +
         'letter-spacing:0.3px;box-shadow:0 1px 3px rgba(0,0,0,.25);'
       );
-      btn.innerHTML='\u270E Logo & API';
+      btn.innerHTML='\u270E Ganti Logo';
       btn.addEventListener('click', function(e){
         e.preventDefault(); e.stopPropagation(); openModal();
       });
       document.documentElement.appendChild(btn);
     }
+    if(!apiBtn){
+      apiBtn = document.createElement('span');
+      apiBtn.id = 'rf-nav-api';
+      apiBtn.setAttribute('style',
+        'position:fixed;z-index:2147483647;display:none;' +
+        'background:#2980b9;color:#fff;border-radius:3px;padding:0 8px;' +
+        'font-weight:bold;font-size:11px;font-family:Arial,sans-serif;' +
+        'user-select:none;white-space:nowrap;cursor:pointer;' +
+        'letter-spacing:0.3px;box-shadow:0 1px 3px rgba(0,0,0,.25);'
+      );
+      apiBtn.innerHTML='\uD83D\uDD11 API URL';
+      apiBtn.addEventListener('click', function(e){
+        e.preventDefault(); e.stopPropagation(); openApiModal();
+      });
+      document.documentElement.appendChild(apiBtn);
+    }
+    // Posisikan: Logo tepat di kanan Admin, API di kanan tombol Logo
+    btn._rfOffset = 0;
     alignToNav(btn);
+    var logoW = btn.getBoundingClientRect().width || 78;
+    apiBtn._rfOffset = logoW + 6;
+    alignToNav(apiBtn);
   }
 
   /* ── Startup: MutationObserver + resize listener ── */
