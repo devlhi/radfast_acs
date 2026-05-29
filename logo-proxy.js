@@ -595,7 +595,11 @@ const NAV_INJECT = String.raw`<script>
         'font-size:13px;display:none;}',
         '#rf-msg.ok{background:#dff0d8;color:#2d6a0f;border:1px solid #b8dca0;display:block;}',
         '#rf-msg.er{background:#f2dede;color:#8b1a1a;border:1px solid #e0b0b0;display:block;}',
-        '@keyframes rf-bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}'
+        // Logo + versi alignment: override inline-block→block agar versi sejajar
+        '#header>.logo{display:block!important;position:relative!important;vertical-align:top!important;}',
+        '#header>.logo>img{margin:10px!important;height:56px!important;width:auto!important;max-width:300px!important;object-fit:contain!important;vertical-align:top!important;}',
+        // Versi di pojok kanan bawah logo (default GenieACS), sejajar dengan img
+        '#header>.logo>.version{position:absolute!important;bottom:5px!important;right:10px!important;top:auto!important;font-family:monospace!important;font-size:10px!important;color:#666!important;line-height:1!important;white-space:nowrap!important;}'
       ].join('');
       document.head.appendChild(s);
     }
@@ -1110,46 +1114,12 @@ function buildLogoReplacerScript(ts, origH) {
     img.removeAttribute('height');
   }
 
-  // Perbaiki layout versi: div.logo → flex-column mulai dari TOP nav bar.
-  // align-self:flex-start → div.logo mulai dari atas, tidak di-center oleh nav.
-  // Sehingga logo(30px) + versi(~10px) = ~40px muat dalam nav bar ~43px.
+  // Versi di-handle CSS (#header>.logo>.version) — tidak perlu DOM manipulation.
+  // Cukup tandai sudah diproses agar tidak dipanggil ulang percuma.
   function fixVersion(img){
-    var par=img.parentElement; if(!par) return;
-
-    // div.logo: flex-column, mulai dari TOP nav bar (bukan di-center)
-    par.style.cssText=(par.getAttribute('style')||'')+
-      ';display:inline-flex!important;flex-direction:column!important;'+
-      'align-items:flex-start!important;align-self:flex-start!important;'+
-      'justify-content:flex-start!important;vertical-align:top!important;'+
-      'flex-wrap:nowrap!important;overflow:visible!important;';
-
-    var nodes=Array.prototype.slice.call(par.childNodes);
-    for(var i=0;i<nodes.length;i++){
-      var n=nodes[i];
-      if(n===img) continue;
-      if(n.nodeType===1){ // element node
-        if(n.getAttribute('data-rf-v')) continue;
-        if(/v\d+\.\d+/.test(n.textContent||'')){
-          n.setAttribute('data-rf-v','1');
-          par.insertBefore(n, img.nextSibling);
-          n.style.cssText='position:static!important;display:block!important;'+
-            'font-size:0.6em!important;color:#555!important;'+
-            'margin:0!important;padding:1px 0 0 2px!important;'+
-            'white-space:nowrap!important;inset:auto!important;line-height:1.2!important;';
-        }
-      } else if(n.nodeType===3){ // text node
-        if(!/v\d+\.\d+/.test(n.nodeValue||'')) continue;
-        var sp=document.createElement('span');
-        sp.setAttribute('data-rf-v','1');
-        sp.style.cssText='position:static!important;display:block!important;'+
-          'font-size:0.6em!important;color:#555!important;'+
-          'margin:0!important;padding:1px 0 0 2px!important;'+
-          'white-space:nowrap!important;line-height:1.2!important;';
-        sp.textContent=n.nodeValue.trim();
-        par.removeChild(n);
-        par.insertBefore(sp, img.nextSibling);
-      }
-    }
+    var par=img.parentElement;
+    if(!par) return;
+    if(!img.getAttribute('data-rf-v')) img.setAttribute('data-rf-v','1');
   }
 
   function fix(){
@@ -1165,7 +1135,7 @@ function buildLogoReplacerScript(ts, origH) {
         img.setAttribute('data-rf-h','1');
         applySize(img);
       }
-      fixVersion(img); // selalu jalankan — handle Mithril re-render versi teks
+      fixVersion(img);
       return;
     }
 
@@ -1177,7 +1147,6 @@ function buildLogoReplacerScript(ts, origH) {
       img.setAttribute('data-rf-h','1');
       applySize(img);
     }
-    fixVersion(img);
     img.onload=function(){img.style.transition='opacity .15s';img.style.opacity='1';};
     img.onerror=function(){img.style.opacity='1';};
   }
