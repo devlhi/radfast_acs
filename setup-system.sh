@@ -333,6 +333,7 @@ declare -A CMDS=(
     ["radfast-add"]="$REPO_DIR/add-instance.sh"
     ["radfast-remove"]="$REPO_DIR/remove-instance.sh"
     ["radfast-list"]="$REPO_DIR/list-instances.sh"
+    ["radfast-multi"]="$REPO_DIR/enable-multi-proxy.sh"
 )
 for CMD in "${!CMDS[@]}"; do
     TARGET="${CMDS[$CMD]}"
@@ -362,6 +363,7 @@ echo -e "  ${CYAN}radfast-status${NC}   ← lihat status instance + resource"
 echo -e "  ${CYAN}radfast-list${NC}     ← lihat daftar semua instance"
 echo -e "  ${CYAN}radfast-add${NC}      ← tambah instance/user baru"
 echo -e "  ${CYAN}radfast-remove${NC}   ← hapus instance"
+echo -e "  ${CYAN}radfast-multi${NC}    ← aktifkan multi-proxy (hemat RAM, 1 proses)"
 echo ""
 echo -e "  ${BOLD}Atau dengan path lengkap:${NC}"
 echo -e "  ${YELLOW}sudo bash add-instance.sh${NC}     ← tambah instance/user baru"

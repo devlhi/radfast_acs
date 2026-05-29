@@ -216,11 +216,25 @@ fi
 systemctl daemon-reload
 success "Systemd services dibuat"
 
+# ── Deteksi mode multi-proxy ────────────────────────────────
+# Jika service genieacs-multi-proxy sudah ada, instance baru tidak perlu
+# menjalankan genieacs-<user>-proxy sendiri. Cukup restart multi-proxy
+# setelah registry ditulis supaya instance baru kebaca.
+MULTI_PROXY_MODE=false
+if [[ -f /etc/systemd/system/genieacs-multi-proxy.service ]] || \
+   [[ -f /lib/systemd/system/genieacs-multi-proxy.service ]] || \
+   systemctl list-unit-files --no-legend 'genieacs-multi-proxy.service' 2>/dev/null | grep -q '^genieacs-multi-proxy\.service'; then
+    MULTI_PROXY_MODE=true
+    info "Mode multi-proxy terdeteksi → proxy instance akan digabung ke genieacs-multi-proxy"
+fi
+
 # ── Enable & Start services ──────────────────────────────────
 info "Menjalankan services..."
 ALL_OK=true
 SERVICES="cwmp fs nbi ui"
-[[ -n "$PROXY_SCRIPT" ]] && SERVICES="$SERVICES proxy"
+if [[ -n "$PROXY_SCRIPT" && "$MULTI_PROXY_MODE" != true ]]; then
+    SERVICES="$SERVICES proxy"
+fi
 
 for SVC in $SERVICES; do
     SVCNAME="genieacs-${USERNAME}-${SVC}"
@@ -239,12 +253,29 @@ for SVC in $SERVICES; do
     fi
 done
 
+# Di mode multi-proxy: pastikan proxy per-instance tidak ikut jalan/bentrok port
+if [[ "$MULTI_PROXY_MODE" == true && -n "$PROXY_SCRIPT" ]]; then
+    systemctl stop "genieacs-${USERNAME}-proxy" &>/dev/null 2>&1 || true
+    systemctl disable "genieacs-${USERNAME}-proxy" &>/dev/null 2>&1 || true
+    success "genieacs-${USERNAME}-proxy dinonaktifkan (digantikan genieacs-multi-proxy)"
+fi
+
 # ── Simpan ke registry ───────────────────────────────────────
 touch "$REGISTRY"
 grep -v "^${USERNAME} " "$REGISTRY" > "${REGISTRY}.tmp" 2>/dev/null \
     && mv "${REGISTRY}.tmp" "$REGISTRY" || rm -f "${REGISTRY}.tmp"
 echo "${USERNAME} UI=${UI_PORT} CWMP=${CWMP_PORT} NBI=${NBI_PORT} FS=${FS_PORT} DB=${DB_NAME} IP=${SERVER_IP} DATE=$(date '+%Y-%m-%d')" \
     >> "$REGISTRY"
+
+# Restart multi-proxy setelah registry update supaya instance baru langsung aktif
+if [[ "$MULTI_PROXY_MODE" == true ]]; then
+    if systemctl restart genieacs-multi-proxy 2>/dev/null; then
+        success "genieacs-multi-proxy direstart → instance '${USERNAME}' aktif di port ${UI_PORT}"
+    else
+        warn "Gagal restart genieacs-multi-proxy (cek: journalctl -u genieacs-multi-proxy -n 50)"
+        ALL_OK=false
+    fi
+fi
 
 # ── Ringkasan ────────────────────────────────────────────────
 echo ""
@@ -280,6 +311,10 @@ echo -e "  Folder   : ${INST_DIR}"
 echo ""
 echo -e "  ${BOLD}Manage:${NC}"
 echo -e "  ${YELLOW}systemctl status genieacs-${USERNAME}-ui${NC}"
-echo -e "  ${YELLOW}journalctl -u genieacs-${USERNAME}-proxy -f${NC}"
+if [[ "$MULTI_PROXY_MODE" == true ]]; then
+    echo -e "  ${YELLOW}journalctl -u genieacs-multi-proxy -f${NC}"
+else
+    echo -e "  ${YELLOW}journalctl -u genieacs-${USERNAME}-proxy -f${NC}"
+fi
 echo -e "  ${YELLOW}sudo bash /opt/radfast_acs/remove-instance.sh ${USERNAME}${NC}"
 echo "============================================================"
