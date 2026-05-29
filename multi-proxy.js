@@ -80,6 +80,10 @@ function loadInstances() {
       RADFAST_ADMIN_TOKEN       : envConf.RADFAST_ADMIN_TOKEN       || '',
       GENIEACS_UI_JWT_SECRET    : envConf.GENIEACS_UI_JWT_SECRET    || '',
       GENIEACS_MONGODB_CONNECTION_URL: envConf.GENIEACS_MONGODB_CONNECTION_URL || '',
+      // NBI gate config — wajib di-pass agar proxy tahu port NBI & secret path
+      GENIEACS_NBI_PORT         : envConf.GENIEACS_NBI_PORT         || '',
+      RADFAST_NBI_GATE_PATH     : envConf.RADFAST_NBI_GATE_PATH     || '',
+      RADFAST_NBI_GATE_MAX_CHANGES: envConf.RADFAST_NBI_GATE_MAX_CHANGES || '',
     };
 
     if (!merged.RADFAST_PROXY_PORT || !merged.RADFAST_UI_INTERNAL) {
