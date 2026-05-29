@@ -2,42 +2,46 @@
 'use strict';
 
 /**
- * multi-proxy.js — menjalankan banyak instance logo-proxy.js dalam 1 proses Node.js.
+ * multi-proxy.js — single-process runner untuk semua instance logo-proxy.js
  *
- * Cara kerja:
- * - Baca /opt/genieacs-instances/.registry
- * - Baca .env tiap instance untuk port, internal UI, logo, token, JWT secret
- * - Jalankan logo-proxy.js berkali-kali di VM context terpisah dalam proses yang sama
- * - Tiap context punya singleton sendiri: CSRF, rate-limit, logo cache, cookie prefix, server
- *
- * Ini menjaga kompatibilitas 100% dengan logo-proxy.js lama tanpa refactor besar.
+ * Strategi:
+ * - Baca /opt/genieacs-instances/.registry + .env tiap instance
+ * - Jalankan logo-proxy.js per-instance pakai Module.wrap + vm.runInThisContext
+ * - process.env di-swap sementara tiap run → logo-proxy.js baca config beda
+ * - Tiap run punya local scope sendiri (csrfStore, ipData, logoCache, server, dll)
+ * - Built-in modules (http, fs, crypto) di-share aman (stateless)
+ * - logo-proxy.js TIDAK perlu diubah — 100% backward compatible
  */
 
-const fs = require('fs');
-const path = require('path');
-const vm = require('vm');
+const fs     = require('fs');
+const path   = require('path');
+const vm     = require('vm');
 const Module = require('module');
+const { createRequire } = require('module');
 
-const SCRIPT = process.env.RADFAST_PROXY_SCRIPT || path.join(__dirname, 'logo-proxy.js');
-const INSTANCES_DIR = process.env.RADFAST_INSTANCES_DIR || '/opt/genieacs-instances';
-const REGISTRY = process.env.RADFAST_REGISTRY || path.join(INSTANCES_DIR, '.registry');
+const SCRIPT        = process.env.RADFAST_PROXY_SCRIPT   || path.join(__dirname, 'logo-proxy.js');
+const INSTANCES_DIR = process.env.RADFAST_INSTANCES_DIR  || '/opt/genieacs-instances';
+const REGISTRY      = process.env.RADFAST_REGISTRY       || path.join(INSTANCES_DIR, '.registry');
 
+// ── Parse .env → object ───────────────────────────────────
 function parseEnvFile(file) {
   const env = {};
   if (!fs.existsSync(file)) return env;
-  const text = fs.readFileSync(file, 'utf8');
-  for (const line of text.split(/\r?\n/)) {
+  for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
     const s = line.trim();
     if (!s || s.startsWith('#')) continue;
-    const m = s.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+    const m = s.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
     if (!m) continue;
-    let v = m[2].trim();
-    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
+    let v = m[2];
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))
+      v = v.slice(1, -1);
     env[m[1]] = v;
   }
   return env;
 }
 
+// ── Parse .registry line ──────────────────────────────────
+// Format: username UI=3001 CWMP=7548 NBI=7558 FS=7568 DB=name IP=x DATE=...
 function parseRegistryLine(line) {
   const parts = line.trim().split(/\s+/);
   if (!parts[0]) return null;
@@ -49,96 +53,153 @@ function parseRegistryLine(line) {
   return obj;
 }
 
+// ── Load semua instance dari registry + .env ──────────────
 function loadInstances() {
-  if (!fs.existsSync(REGISTRY)) throw new Error(`Registry tidak ditemukan: ${REGISTRY}`);
-  const lines = fs.readFileSync(REGISTRY, 'utf8').split(/\r?\n/).filter(l => l.trim() && !l.trim().startsWith('#'));
+  if (!fs.existsSync(REGISTRY)) {
+    console.warn(`[multi-proxy] Registry tidak ada: ${REGISTRY}`);
+    return [];
+  }
+  const lines = fs.readFileSync(REGISTRY, 'utf8')
+    .split(/\r?\n/).filter(l => l.trim() && !l.trim().startsWith('#'));
   const instances = [];
+
   for (const line of lines) {
     const r = parseRegistryLine(line);
     if (!r || !r.name) continue;
-    const instDir = path.join(INSTANCES_DIR, r.name);
-    const env = parseEnvFile(path.join(instDir, '.env'));
+
+    const instDir  = path.join(INSTANCES_DIR, r.name);
+    const envConf  = parseEnvFile(path.join(instDir, '.env'));
+    const logoDir  = path.join(instDir, 'logo');
+    const logoFile = path.join(logoDir, 'custom-logo');
+
     const merged = {
-      ...process.env,
-      ...env,
-      RADFAST_MULTI_CHILD: '1',
-      RADFAST_INSTANCE_NAME: r.name,
-      RADFAST_PROXY_PORT: env.RADFAST_PROXY_PORT || r.UI,
-      RADFAST_UI_INTERNAL: env.RADFAST_UI_INTERNAL,
-      RADFAST_LOGO_FILE: env.RADFAST_LOGO_FILE || path.join(instDir, 'logo', 'custom-logo'),
-      RADFAST_ADMIN_TOKEN: env.RADFAST_ADMIN_TOKEN || '',
-      GENIEACS_UI_JWT_SECRET: env.GENIEACS_UI_JWT_SECRET || ''
+      RADFAST_PROXY_PORT        : envConf.RADFAST_PROXY_PORT        || r.UI,
+      RADFAST_UI_INTERNAL       : envConf.RADFAST_UI_INTERNAL,
+      RADFAST_LOGO_FILE         : envConf.RADFAST_LOGO_FILE         || logoFile,
+      RADFAST_ADMIN_TOKEN       : envConf.RADFAST_ADMIN_TOKEN       || '',
+      GENIEACS_UI_JWT_SECRET    : envConf.GENIEACS_UI_JWT_SECRET    || '',
+      GENIEACS_MONGODB_CONNECTION_URL: envConf.GENIEACS_MONGODB_CONNECTION_URL || '',
     };
+
     if (!merged.RADFAST_PROXY_PORT || !merged.RADFAST_UI_INTERNAL) {
-      console.warn(`[multi-proxy] skip ${r.name}: RADFAST_PROXY_PORT/RADFAST_UI_INTERNAL kosong`);
+      console.warn(`[multi-proxy] skip "${r.name}": port/internal kosong`);
       continue;
     }
-    instances.push({ name: r.name, dir: instDir, env: merged });
+
+    try { fs.mkdirSync(logoDir, { recursive: true }); } catch (_) {}
+
+    instances.push({
+      name: r.name,
+      dir: instDir,
+      port: parseInt(String(merged.RADFAST_PROXY_PORT)),
+      geniePort: parseInt(String(merged.RADFAST_UI_INTERNAL)),
+      env: merged,
+    });
   }
   return instances;
 }
 
-function runInstance(inst, code) {
-  const localModule = new Module(SCRIPT, module.parent || module);
-  localModule.filename = SCRIPT;
-  localModule.paths = Module._nodeModulePaths(path.dirname(SCRIPT));
+// ── Jalankan 1 instance logo-proxy.js ─────────────────────
+function runInstance(instance) {
+  const { name, dir, env } = instance;
 
-  const sandboxProcess = Object.create(process);
-  sandboxProcess.env = { ...inst.env };
-  sandboxProcess.argv = [process.execPath, SCRIPT];
-  sandboxProcess.cwd = () => inst.dir;
-  sandboxProcess.chdir = process.chdir.bind(process);
+  // Simpan & swap process.env
+  const origEnv = { ...process.env };
+  try {
+    process.env = { ...origEnv, ...env };
 
-  const wrapped = Module.wrap(code);
-  const script = new vm.Script(wrapped, { filename: SCRIPT, displayErrors: true });
-  const context = vm.createContext({
-    console,
-    Buffer,
-    setTimeout,
-    clearTimeout,
-    setInterval,
-    clearInterval,
-    setImmediate,
-    clearImmediate,
-    URL,
-    URLSearchParams,
-    process: sandboxProcess,
-    global: null,
-    globalThis: null,
-    __filename: SCRIPT,
-    __dirname: path.dirname(SCRIPT)
-  });
-  context.global = context;
-  context.globalThis = context;
+    // Baca fresh — tiap instance punya closure sendiri
+    let code       = fs.readFileSync(SCRIPT, 'utf8');
+    const filename = SCRIPT;
 
-  const fn = script.runInContext(context);
-  fn.call(localModule.exports, localModule.exports, localModule.require.bind(localModule), localModule, SCRIPT, path.dirname(SCRIPT));
+    // Strip shebang (#!/usr/bin/env node) — Module.wrap tidak handle ini,
+    // hanya valid saat Node load file langsung. Ganti jadi baris kosong
+    // agar nomor baris di stack trace tetap akurat.
+    if (code.charCodeAt(0) === 0x23 && code.charCodeAt(1) === 0x21) {
+      const nl = code.indexOf('\n');
+      code = (nl >= 0) ? code.slice(nl) : '';
+    }
+
+    // Module.wrap → (function(exports, require, module, __filename, __dirname) { ... })
+    // vm.runInThisContext → compile di Node.js utama → require('http') etc tetap jalan
+    const wrapped    = Module.wrap(code);
+    const compiledFn = vm.runInThisContext(wrapped, {
+      filename,
+      lineOffset: 0,
+      displayErrors: true,
+    });
+
+    if (typeof compiledFn !== 'function') {
+      throw new Error(`Compiled to ${typeof compiledFn}, expected function`);
+    }
+
+    // Module object sendiri untuk instance ini
+    const mod = {
+      id: filename,
+      filename,
+      loaded: false,
+      parent: null,
+      children: [],
+      exports: {},
+      paths: Module._nodeModulePaths(dir),
+    };
+
+    // require per-instance — resolve built-in modules naturally
+    const instanceRequire = createRequire(filename);
+
+    // Jalankan → csrfStore, ipData, _logoMemCache, server.listen semua lokal
+    compiledFn.call(mod.exports, mod.exports, instanceRequire, mod, filename, dir);
+    mod.loaded = true;
+
+  } catch (err) {
+    console.error(`[multi-proxy] ✗ "${name}" error:`, err.stack || err.message);
+  } finally {
+    process.env = origEnv; // selalu restore
+  }
 }
 
+// ── MAIN ──────────────────────────────────────────────────
 function main() {
+  console.log(`[multi-proxy] script     : ${SCRIPT}`);
+  console.log(`[multi-proxy] registry   : ${REGISTRY}`);
+
   const instances = loadInstances();
-  if (!instances.length) throw new Error('Tidak ada instance valid di registry');
-  const ports = new Set();
-  for (const inst of instances) {
-    const p = String(inst.env.RADFAST_PROXY_PORT);
-    if (ports.has(p)) throw new Error(`Port duplikat: ${p}`);
-    ports.add(p);
+  if (!instances.length) {
+    console.log('[multi-proxy] Tidak ada instance. Jalankan logo-proxy.js langsung untuk single mode.');
+    return;
   }
 
-  const code = fs.readFileSync(SCRIPT, 'utf8');
-  console.log(`[multi-proxy] start ${instances.length} instance dalam 1 proses Node.js`);
+  // Cek port duplikat
+  const portMap = new Map();
   for (const inst of instances) {
-    runInstance(inst, code);
+    const key = String(inst.port);
+    if (portMap.has(key)) {
+      console.error(`[multi-proxy] Port duplikat: :${key} = "${inst.name}" & "${portMap.get(key)}"`);
+      process.exit(1);
+    }
+    portMap.set(key, inst.name);
   }
+
+  console.log(`[multi-proxy] Start ${instances.length} instance dalam 1 proses Node.js:`);
+  for (const inst of instances) {
+    console.log(`  • ${inst.name}  :${inst.port} → :${inst.geniePort}`);
+  }
+  console.log('');
+
+  for (const inst of instances) {
+    runInstance(inst);
+  }
+
+  console.log(`\n[multi-proxy] ✓ Selesai. ${instances.length} servers aktif dalam 1 process.`);
 }
 
-process.on('uncaughtException', err => {
-  console.error('[multi-proxy] uncaught:', err && err.stack || err);
-  process.exit(1);
+// ── Global error handlers ─────────────────────────────────
+process.on('uncaughtException', (err) => {
+  console.error('[multi-proxy] Uncaught:', err.stack || err);
+  // Jangan exit — instance lain mungkin masih jalan
 });
-process.on('unhandledRejection', err => {
-  console.error('[multi-proxy] unhandled:', err && err.stack || err);
-  process.exit(1);
+process.on('unhandledRejection', (reason) => {
+  console.error('[multi-proxy] Unhandled:', reason);
 });
 
 main();
