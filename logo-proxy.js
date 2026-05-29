@@ -1046,94 +1046,63 @@ const COOKIE_WRAPPER = String.raw`<script>
 })();
 </script>`;
 
-// Script ganti logo GenieACS via DOM.
-// Diinjeksi di awal <head> (sebelum app.js) agar MutationObserver aktif
-// sebelum Mithril render logo — logo custom muncul instant tanpa flash.
-function buildLogoReplacerScript(ts, origH) {
-    // origH = tinggi logo asli dari _origSVG.h (px), 0 = pakai fallback
-    const safeH = (origH && origH > 0) ? Math.round(origH) : 0;
+// Script ganti logo GenieACS via DOM — FALLBACK saja.
+// Mekanisme utama = patch SVG data URI di app.js (patchLogoInJS), jadi
+// Mithril render logo custom secara NATIVE tanpa flash.
+// Script ini HANYA bertindak kalau patch JS gagal (src masih SVG asli /public/).
+// PENTING: jangan pernah set opacity:0 — kalau onload tidak fire (cached /
+// element diganti Mithril), logo bisa hilang permanen.
+function buildLogoReplacerScript(ts) {
     return String.raw`<script>
 (function(){
   'use strict';
   var SRC='/__admin/logo/preview?t=${ts}';
-  // Tinggi logo asli GenieACS (dari viewBox). 0 = pakai fallback dinamis.
-  var LOGO_H=${safeH};
+  var DONE='__rfLogoDone';
 
-  function navHeight(){
-    var NAV=['Overview','Devices','Faults','Admin'];
-    var as=document.querySelectorAll('a');
-    for(var i=0;i<as.length;i++){
-      if(NAV.indexOf(as[i].textContent.trim())<0) continue;
-      var el=as[i].parentElement;
-      for(var n=0;n<6;n++){
-        if(!el||el===document.body) break;
-        if(el.tagName==='UL'||el.tagName==='NAV'||el.children.length>=3) break;
-        el=el.parentElement;
+  function isOriginalLogo(src){
+    /* Logo asli GenieACS = SVG data URI ATAU file dari /public/ */
+    if(!src) return false;
+    if(src.indexOf('data:image/svg+xml')>=0) return true;
+    if(src.indexOf('/public/')>=0 && src.indexOf('.svg')>=0) return true;
+    return false;
+  }
+
+  function applyLogo(){
+    var hdr=document.getElementById('header');
+    if(!hdr) return;
+    var logo=hdr.querySelector('.logo')||hdr;
+    var imgs=logo.querySelectorAll('img');
+    for(var i=0;i<imgs.length;i++){
+      var img=imgs[i];
+      var src=img.getAttribute('src')||'';
+      /* Sudah pakai logo custom (dari JS patch ATAU dari kita) → biarkan */
+      if(src.indexOf('/__admin/logo/preview')>=0){
+        img.setAttribute(DONE,'1');
+        continue;
       }
-      if(el&&el!==document.body){var h=el.getBoundingClientRect().height;if(h>10)return Math.round(h);}
+      /* JS patch gagal & ini logo asli → ganti src LANGSUNG (tanpa hide) */
+      if(isOriginalLogo(src) && !img.getAttribute(DONE)){
+        img.setAttribute('src',SRC);
+        img.setAttribute(DONE,'1');
+      }
     }
-    return 0;
   }
 
-  function findLogo(){
-    var imgs=document.querySelectorAll('img');
-    for(var i=0;i<imgs.length;i++){
-      var s=imgs[i].getAttribute('src')||'';
-      // Cari logo GenieACS: src dari /public/ (belum di-patch) ATAU /__admin/logo/ (sudah di-patch)
-      if(s.indexOf('/public/')>=0||s.indexOf('/__admin/logo/')>=0) return imgs[i];
-    }
-    return imgs[0]||null;
+  function init(){
+    applyLogo();
+    /* Observer ringan: pantau perubahan DOM, debounce 40ms */
+    new MutationObserver(function(){
+      clearTimeout(window.__rfLogoTimer);
+      window.__rfLogoTimer=setTimeout(applyLogo,40);
+    }).observe(document.body,{childList:true,subtree:true});
   }
 
-  function logoImgH(){
-    // Pakai tinggi logo asli (dari server) jika tersedia.
-    // Fallback: img.naturalHeight (dari SVG wrapper), lalu konstanta 30px.
-    if(LOGO_H>0) return LOGO_H;
-    var imgs=document.querySelectorAll('img');
-    for(var i=0;i<imgs.length;i++){
-      var s=imgs[i].getAttribute('src')||'';
-      if((s.indexOf('/public/')>=0||s.indexOf('/__admin/logo/')>=0)&&imgs[i].naturalHeight>0)
-        return imgs[i].naturalHeight;
-    }
-    return 30; // fallback aman (tinggi logo GenieACS asli ~30px)
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded',init);
+  } else {
+    init();
   }
-
-  function applySize(img){
-    // Pakai ukuran asli — TIDAK dikurangi untuk versi (versi di-handle align-self)
-    var h=logoImgH();
-    img.style.height=h+'px';
-    img.style.width='auto';
-    img.style.maxWidth='300px';
-    img.style.objectFit='contain';
-    img.removeAttribute('width');
-    img.removeAttribute('height');
-  }
-
-  // Versi sudah di-handle CSS (#header>.logo>.version) — tidak perlu manipulasi DOM.
-  function fixVersion(img){
-    if(!img.getAttribute('data-rf-v')) img.setAttribute('data-rf-v','1');
-  }
-
-  function fix(){
-    var img=findLogo();
-    if(!img||img.getAttribute('data-rf-h')) return; // sudah di-patch, skip
-    // Tunggu nav render (src /admin/logo sudah benar)
-    var src=img.getAttribute('src')||'';
-    if(src.indexOf('/__admin/logo/')>=0) return;
-    // JS bundle patch belum aktif — ganti src + apply size
-    img.style.opacity='0';
-    img.setAttribute('src',SRC);
-    applySize(img);
-    img.onload=function(){img.style.transition='opacity .15s';img.style.opacity='1';};
-    img.onerror=function(){img.style.opacity='1';};
-  }
-
-  // Observer hanya pantau childList pada <body> — sangat ringan
-  if(document.body){
-    new MutationObserver(function(){fix();}).observe(
-      document.body, {childList:true});
-  }
-  window.addEventListener('load',function(){setTimeout(fix,200);});
+  window.addEventListener('load',function(){setTimeout(applyLogo,150);});
 })();
 </script>`;
 }
@@ -1144,11 +1113,12 @@ function injectNavLink(html) {
     //   2. Logo CSS — aktif dari awal page load, untuk sejajarkan logo+versi
     //   3. Logo replacer — patch src logo (hanya 1x, tidak MutationObserver berat)
     const logoScript = findCustomLogo()
-        ? buildLogoReplacerScript(Date.now(), _origSVG ? _origSVG.h : 0) : '';
+        ? buildLogoReplacerScript(Date.now()) : '';
     const LOGO_CSS = findCustomLogo() ? `<style id="__rf-logo-css">
-#header>.logo                { display:inline-block!important;position:relative!important;padding-bottom:8px!important;vertical-align:top!important }
-#header>.logo>img            { margin:10px!important;margin-bottom:2px!important;height:56px!important;width:auto!important;object-fit:contain!important;vertical-align:top!important }
-#header>.logo>.version      { position:absolute!important;bottom:0!important;left:12px!important;right:auto!important;top:auto!important;font-family:monospace!important;font-size:10px!important;color:#666!important;line-height:1!important;white-space:nowrap!important }
+/* Override posisi logo+versi — pastikan versi di bawah logo, rata kiri */
+#header>.logo                { display:inline-flex!important;flex-direction:column!important;align-items:flex-start!important;position:relative!important;vertical-align:top!important;padding-bottom:10px!important;gap:0!important }
+#header>.logo>img            { margin:10px!important;margin-bottom:0!important;height:56px!important;width:auto!important;object-fit:contain!important;vertical-align:top!important }
+#header>.logo>.version      { position:absolute!important;bottom:0!important;left:12px!important;right:auto!important;top:auto!important;font-family:monospace!important;font-size:10px!important;color:#666!important;line-height:1!important;white-space:nowrap!important;transform:none!important;letter-spacing:0!important }
 </style>` : '';
     const headInject = COOKIE_WRAPPER + LOGO_CSS + logoScript;
 
