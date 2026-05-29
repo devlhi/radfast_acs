@@ -127,7 +127,7 @@ GENIEACS_UI_JWT_SECRET=${JWT_SECRET}
 # Bind NBI ke localhost saja. NBI = REST API TANPA auth bawaan.
 # Port NBI TIDAK dibuka ke publik; akses publik HANYA lewat secret path di
 # port UI (logo-proxy meneruskan {RADFAST_NBI_GATE_PATH}/... → 127.0.0.1:${NBI_PORT}).
-# Billing/GoRadius pakai URL: http://${SERVER_IP}:${UI_PORT}${NBI_GATE_PATH}
+# Billing/RadFastBill pakai URL: http://${SERVER_IP}:${UI_PORT}${NBI_GATE_PATH}
 # Catatan: FS sengaja TIDAK di-localhost agar firmware OTA tetap jalan;
 # amankan FS via firewall/VPN sesuai kebutuhan.
 GENIEACS_NBI_INTERFACE=127.0.0.1
@@ -325,12 +325,12 @@ echo -e "  │   ACS URL device: http://${SERVER_IP}:${CWMP_PORT}    │"
 echo -e "  ├──────────────────────────────────────────────────────┤"
 echo -e "  │ NBI   (REST API / Integrasi)                          │"
 echo -e "  │   Port ${NBI_PORT} di-LOCK ke localhost (tidak publik).      │"
-echo -e "  │   Secure URL (untuk billing/GoRadius):               │"
+echo -e "  │   Secure URL (untuk billing/RadFastBill):            │"
 echo -e "  │   → ${CYAN}http://${SERVER_IP}:${UI_PORT}${NBI_GATE_PATH}${NC}"
 echo -e "  ├──────────────────────────────────────────────────────┤"
 echo -e "  │ FS    (File Server firmware)   port ${FS_PORT}               │"
 echo -e "  └──────────────────────────────────────────────────────┘"
-echo -e "  ${YELLOW}⚠  Simpan Secure URL NBI di atas — isikan ke GoRadius Settings > Umum > GenieACS API URL.${NC}"
+echo -e "  ${YELLOW}⚠  Simpan Secure URL NBI di atas — isikan ke RadFastBill Settings > Umum > GenieACS API URL.${NC}"
 echo ""
 echo -e "  Database : ${DB_NAME}"
 echo -e "  Folder   : ${INST_DIR}"
