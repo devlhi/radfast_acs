@@ -23,6 +23,10 @@ const crypto = require('crypto');
 
 const PUBLIC_PORT  = parseInt(process.env.RADFAST_PROXY_PORT       || 3001);
 const GENIE_PORT   = parseInt(process.env.RADFAST_UI_INTERNAL      || 13001);
+const NBI_PORT     = parseInt(process.env.GENIEACS_NBI_PORT        || 7558);
+// Secret path untuk akses NBI (REST API GenieACS) lewat port UI publik ini.
+// Kosong = gate NBI nonaktif. Di-set per instance via .env (RADFAST_NBI_GATE_PATH).
+const NBI_GATE_PATH = (process.env.RADFAST_NBI_GATE_PATH || '').trim().replace(/\/+$/, '');
 const LOGO_BASE    = process.env.RADFAST_LOGO_FILE                 || '/tmp/radfast-logo';
 const ADMIN_TOKEN  = process.env.RADFAST_ADMIN_TOKEN               || '';
 const JWT_SECRET   = process.env.GENIEACS_UI_JWT_SECRET            || '';
@@ -1349,6 +1353,42 @@ function proxyRequest(req, res) {
 }
 
 // ════════════════════════════════════════════════════════════
+//  NBI SECURE GATE
+//  NBI (REST API GenieACS) TIDAK punya auth bawaan. Daripada buka
+//  port NBI ke publik, kita expose lewat SECRET PATH di port UI publik
+//  ini. Hanya yang tahu path rahasia yang bisa akses.
+//  Contoh: http://IP:3001/<secret>/devices  →  127.0.0.1:7558/devices
+// ════════════════════════════════════════════════════════════
+function proxyNbiRequest(req, res, upstreamPath) {
+    const headers = { ...req.headers, host: `127.0.0.1:${NBI_PORT}` };
+    delete headers['accept-encoding'];
+    // Cookie UI tidak relevan untuk NBI — buang biar bersih
+    delete headers['cookie'];
+
+    const opts = {
+        hostname : '127.0.0.1',
+        port     : NBI_PORT,
+        path     : upstreamPath,
+        method   : req.method,
+        headers
+    };
+
+    const proxy = http.request(opts, (pRes) => {
+        const respHeaders = { ...pRes.headers };
+        delete respHeaders['content-security-policy'];
+        delete respHeaders['x-content-security-policy'];
+        res.writeHead(pRes.statusCode, respHeaders);
+        pRes.pipe(res);
+    });
+
+    proxy.on('error', () => {
+        sendSecure(res, 502, 'application/json', '{"error":"NBI upstream tidak tersedia"}');
+    });
+
+    req.pipe(proxy);
+}
+
+// ════════════════════════════════════════════════════════════
 //  MAIN SERVER
 // ════════════════════════════════════════════════════════════
 const server = http.createServer((req, res) => {
@@ -1371,6 +1411,19 @@ const server = http.createServer((req, res) => {
             sendSecure(res, 413, 'text/plain', 'Payload Too Large');
             return;
         }
+    }
+
+    // ── NBI secure gate → teruskan ke REST API GenieACS ────
+    // Hanya request yang lewat SECRET PATH yang diteruskan ke NBI lokal.
+    // Akses /devices dll tanpa path rahasia TIDAK akan match → jatuh ke UI.
+    if (NBI_GATE_PATH &&
+        (req.url === NBI_GATE_PATH ||
+         req.url.startsWith(NBI_GATE_PATH + '/') ||
+         req.url.startsWith(NBI_GATE_PATH + '?'))) {
+        let upstreamPath = req.url.slice(NBI_GATE_PATH.length);
+        if (upstreamPath === '' || upstreamPath[0] === '?') upstreamPath = '/' + upstreamPath;
+        proxyNbiRequest(req, res, upstreamPath);
+        return;
     }
 
     // ── Admin: tampilkan form ──────────────────────────────
