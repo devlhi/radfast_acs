@@ -1110,17 +1110,16 @@ function buildLogoReplacerScript(ts) {
 function injectNavLink(html) {
     // Inject di awal <head>:
     //   1. COOKIE_WRAPPER — harus sebelum app.js untuk cookie isolation
-    //   2. Logo CSS — aktif dari awal page load, untuk sejajarkan logo+versi
-    //   3. Logo replacer — patch src logo (hanya 1x, tidak MutationObserver berat)
-    const logoScript = findCustomLogo()
-        ? buildLogoReplacerScript(Date.now()) : '';
+    //   2. Logo CSS — override posisi versi saat custom logo aktif
+    // TIDAK perlu DOM injection untuk logo — GenieACS logo request diintercept
+    // langsung di proxy (isLogoReq handler) dan diganti dengan logo custom.
     const LOGO_CSS = findCustomLogo() ? `<style id="__rf-logo-css">
 /* Override posisi logo+versi — pastikan versi di bawah logo, rata kiri */
 #header>.logo                { display:inline-flex!important;flex-direction:column!important;align-items:flex-start!important;position:relative!important;vertical-align:top!important;padding-bottom:10px!important;gap:0!important }
 #header>.logo>img            { margin:10px!important;margin-bottom:0!important;height:56px!important;width:auto!important;object-fit:contain!important;vertical-align:top!important }
 #header>.logo>.version      { position:absolute!important;bottom:0!important;left:12px!important;right:auto!important;top:auto!important;font-family:monospace!important;font-size:10px!important;color:#666!important;line-height:1!important;white-space:nowrap!important;transform:none!important;letter-spacing:0!important }
 </style>` : '';
-    const headInject = COOKIE_WRAPPER + LOGO_CSS + logoScript;
+    const headInject = COOKIE_WRAPPER + LOGO_CSS;
 
     var headTag = html.match(/<head[^>]*>/i);
     if (headTag) {
@@ -1636,14 +1635,13 @@ const server = http.createServer((req, res) => {
     }
 
     // ── Intercept semua request logo GenieACS ─────────────
-    // GenieACS pakai nama seperti:
-    //   /public/logo-white.svg
-    //   /public/logo-favicon.svg
-    //   /public/logo.svg
-    //   /public/logo-<hash>.svg
-    // Tangkap semua path yang ada kata "logo" di bawah /public/
-    // dengan ekstensi gambar apapun.
-    const isLogoReq = /\/public\/[^/]*logo[^/]*\.(svg|png|jpe?g|gif|webp|ico|bmp)/i.test(req.url);
+    // GenieACS serve static via koa-static dengan root=<install>/public,
+    // jadi URL-nya TANPA prefix /public/, contoh:
+    //   /logo-3976e73d.svg   (logo utama, di-referensikan var Mo di bundle)
+    //   /logo-white.svg, /logo.svg, /public/logo.svg (varian)
+    // Tangkap path apapun yang ada kata "logo" + ekstensi gambar,
+    // dengan ATAU tanpa prefix /public/.
+    const isLogoReq = /(?:^|\/)[^/?]*logo[^/?]*\.(svg|png|jpe?g|gif|webp|ico|bmp)(?:\?|$)/i.test(req.url);
     if (isLogoReq) {
         const custom = findCustomLogo();
         if (custom) {
