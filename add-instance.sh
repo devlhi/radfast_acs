@@ -185,56 +185,58 @@ WantedBy=multi-user.target
 EOF
 done
 
-# Service proxy (UI publik + logo upload)
-if [[ -n "$PROXY_SCRIPT" ]]; then
-    cat > "/etc/systemd/system/genieacs-${USERNAME}-proxy.service" <<EOF
+# Proxy publik + logo upload sekarang SELALU pakai multi-proxy.
+# Tidak ada lagi service genieacs-<user>-proxy per instance.
+if [[ -z "$PROXY_SCRIPT" ]]; then
+    warn "logo-proxy.js tidak ditemukan — multi-proxy tetap dibuat, tapi fitur logo/proxy bisa gagal"
+fi
+
+MULTI_SCRIPT="$REPO_DIR/multi-proxy.js"
+if [[ ! -f "$MULTI_SCRIPT" ]]; then
+    warn "multi-proxy.js tidak ditemukan di $MULTI_SCRIPT"
+fi
+
+MULTI_SERVICE_FILE="/etc/systemd/system/genieacs-multi-proxy.service"
+if [[ ! -f "$MULTI_SERVICE_FILE" ]]; then
+    info "Membuat service genieacs-multi-proxy (mode wajib)..."
+    cat > "$MULTI_SERVICE_FILE" <<EOF
 [Unit]
-Description=GenieACS UI Proxy — ${USERNAME} (port ${UI_PORT})
-After=network.target genieacs-${USERNAME}-ui.service
-Requires=genieacs-${USERNAME}-ui.service
+Description=RadFast ACS Multi-Instance Logo Proxy
+After=network.target
 
 [Service]
 Type=simple
-User=root
-WorkingDirectory=${INST_DIR}
-EnvironmentFile=${INST_DIR}/.env
-ExecStart=${NODE_BIN} ${PROXY_SCRIPT}
+Environment=NODE_ENV=production
+Environment=RADFAST_INSTANCES_DIR=${INSTANCES_DIR}
+Environment=RADFAST_REGISTRY=${REGISTRY}
+Environment=RADFAST_PROXY_SCRIPT=${PROXY_SCRIPT:-$REPO_DIR/logo-proxy.js}
+ExecStart=${NODE_BIN} ${MULTI_SCRIPT}
 Restart=on-failure
-RestartSec=3
+RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=genieacs-${USERNAME}-proxy
+SyslogIdentifier=genieacs-multi-proxy
+LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target
 EOF
-    success "Service proxy dibuat (port $UI_PORT)"
-else
-    warn "Service proxy tidak dibuat (logo-proxy.js tidak ditemukan)"
+    success "Service genieacs-multi-proxy dibuat"
 fi
+
+# Bersihkan service proxy per-instance lama untuk user ini jika pernah ada
+rm -f "/etc/systemd/system/genieacs-${USERNAME}-proxy.service"
+systemctl disable "genieacs-${USERNAME}-proxy" &>/dev/null 2>&1 || true
+systemctl stop "genieacs-${USERNAME}-proxy" &>/dev/null 2>&1 || true
 
 systemctl daemon-reload
-success "Systemd services dibuat"
-
-# ── Deteksi mode multi-proxy ────────────────────────────────
-# Jika service genieacs-multi-proxy sudah ada, instance baru tidak perlu
-# menjalankan genieacs-<user>-proxy sendiri. Cukup restart multi-proxy
-# setelah registry ditulis supaya instance baru kebaca.
-MULTI_PROXY_MODE=false
-if [[ -f /etc/systemd/system/genieacs-multi-proxy.service ]] || \
-   [[ -f /lib/systemd/system/genieacs-multi-proxy.service ]] || \
-   systemctl list-unit-files --no-legend 'genieacs-multi-proxy.service' 2>/dev/null | grep -q '^genieacs-multi-proxy\.service'; then
-    MULTI_PROXY_MODE=true
-    info "Mode multi-proxy terdeteksi → proxy instance akan digabung ke genieacs-multi-proxy"
-fi
+systemctl enable genieacs-multi-proxy &>/dev/null 2>&1 || true
+success "Systemd services dibuat (multi-proxy only)"
 
 # ── Enable & Start services ──────────────────────────────────
 info "Menjalankan services..."
 ALL_OK=true
 SERVICES="cwmp fs nbi ui"
-if [[ -n "$PROXY_SCRIPT" && "$MULTI_PROXY_MODE" != true ]]; then
-    SERVICES="$SERVICES proxy"
-fi
 
 for SVC in $SERVICES; do
     SVCNAME="genieacs-${USERNAME}-${SVC}"
@@ -253,13 +255,6 @@ for SVC in $SERVICES; do
     fi
 done
 
-# Di mode multi-proxy: pastikan proxy per-instance tidak ikut jalan/bentrok port
-if [[ "$MULTI_PROXY_MODE" == true && -n "$PROXY_SCRIPT" ]]; then
-    systemctl stop "genieacs-${USERNAME}-proxy" &>/dev/null 2>&1 || true
-    systemctl disable "genieacs-${USERNAME}-proxy" &>/dev/null 2>&1 || true
-    success "genieacs-${USERNAME}-proxy dinonaktifkan (digantikan genieacs-multi-proxy)"
-fi
-
 # ── Simpan ke registry ───────────────────────────────────────
 touch "$REGISTRY"
 grep -v "^${USERNAME} " "$REGISTRY" > "${REGISTRY}.tmp" 2>/dev/null \
@@ -268,13 +263,11 @@ echo "${USERNAME} UI=${UI_PORT} CWMP=${CWMP_PORT} NBI=${NBI_PORT} FS=${FS_PORT} 
     >> "$REGISTRY"
 
 # Restart multi-proxy setelah registry update supaya instance baru langsung aktif
-if [[ "$MULTI_PROXY_MODE" == true ]]; then
-    if systemctl restart genieacs-multi-proxy 2>/dev/null; then
-        success "genieacs-multi-proxy direstart → instance '${USERNAME}' aktif di port ${UI_PORT}"
-    else
-        warn "Gagal restart genieacs-multi-proxy (cek: journalctl -u genieacs-multi-proxy -n 50)"
-        ALL_OK=false
-    fi
+if systemctl restart genieacs-multi-proxy 2>/dev/null; then
+    success "genieacs-multi-proxy direstart → instance '${USERNAME}' aktif di port ${UI_PORT}"
+else
+    warn "Gagal restart genieacs-multi-proxy (cek: journalctl -u genieacs-multi-proxy -n 50)"
+    ALL_OK=false
 fi
 
 # ── Ringkasan ────────────────────────────────────────────────
@@ -311,10 +304,6 @@ echo -e "  Folder   : ${INST_DIR}"
 echo ""
 echo -e "  ${BOLD}Manage:${NC}"
 echo -e "  ${YELLOW}systemctl status genieacs-${USERNAME}-ui${NC}"
-if [[ "$MULTI_PROXY_MODE" == true ]]; then
-    echo -e "  ${YELLOW}journalctl -u genieacs-multi-proxy -f${NC}"
-else
-    echo -e "  ${YELLOW}journalctl -u genieacs-${USERNAME}-proxy -f${NC}"
-fi
+echo -e "  ${YELLOW}journalctl -u genieacs-multi-proxy -f${NC}"
 echo -e "  ${YELLOW}sudo bash /opt/radfast_acs/remove-instance.sh ${USERNAME}${NC}"
 echo "============================================================"

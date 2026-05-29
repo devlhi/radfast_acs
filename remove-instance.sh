@@ -110,6 +110,16 @@ if [[ -f "$REGISTRY" ]]; then
 fi
 success "Registry diupdate"
 
+# ── Restart multi-proxy supaya port instance yang dihapus lepas ──
+if [[ -f /etc/systemd/system/genieacs-multi-proxy.service ]] || \
+   systemctl list-unit-files --no-legend 'genieacs-multi-proxy.service' 2>/dev/null | grep -q '^genieacs-multi-proxy\.service'; then
+    if systemctl restart genieacs-multi-proxy 2>/dev/null; then
+        success "genieacs-multi-proxy direstart (port ${USERNAME} dilepas)"
+    else
+        warn "Gagal restart genieacs-multi-proxy (cek: journalctl -u genieacs-multi-proxy -n 50)"
+    fi
+fi
+
 echo ""
 echo -e "${GREEN}${BOLD}============================================================${NC}"
 echo -e "${GREEN}${BOLD}   Instance '${USERNAME}' berhasil dihapus${NC}"

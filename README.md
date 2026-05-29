@@ -143,8 +143,8 @@ radfast-multi    # jalankan multi-proxy mode (semua instance dalam 1 proses Node
 
 ```
 /opt/radfast_acs/               ← Script installer (dari repo ini)
-├── logo-proxy.js               ← Proxy instance tunggal
-├── multi-proxy.js              ← Proxy multi-instance (1 proses Node.js)
+├── logo-proxy.js               ← Proxy engine (dipanggil multi-proxy.js)
+├── multi-proxy.js              ← Semua proxy dalam 1 proses Node.js
 ├── add-instance.sh             ← Tambah instance baru
 └── remove-instance.sh          ← Hapus instance
 /opt/genieacs-app/              ← App GenieACS (shared, 1 copy)
@@ -158,31 +158,20 @@ radfast-multi    # jalankan multi-proxy mode (semua instance dalam 1 proses Node
 └── ...
 ```
 
-### Mode Standar (per-instance proxy)
-
-Setiap instance punya Node.js proxy sendiri:
+Systemd per instance:
 ```
 genieacs-alice-cwmp.service    ← TR-069 device
 genieacs-alice-fs.service      ← File server
 genieacs-alice-nbi.service     ← REST API
 genieacs-alice-ui.service      ← UI internal
-genieacs-alice-proxy.service   ← Proxy publik + logo manager
 ```
 
-### Mode Multi-Proxy ⭐ (recommended)
-
-Semua instance proxy digabung dalam **1 proses Node.js** → hemat RAM:
+Single proxy process (hemat RAM):
 ```
-genieacs-alice-cwmp.service    ← TR-069 device
-genieacs-alice-fs.service      ← File server
-genieacs-alice-nbi.service     ← REST API
-genieacs-alice-ui.service      ← UI internal
-                                ← proxy TIDAK per-instance
-
-genieacs-multi-proxy.service   ← Semua proxy dalam 1 proses Node.js
+genieacs-multi-proxy.service   ← Semua instance proxy dalam 1 proses Node.js
 ```
 
-> `radfast-add` otomatis mendeteksi mode multi-proxy.
+> `radfast-add` otomatis buat & restart `genieacs-multi-proxy`.
 > Instance baru langsung aktif tanpa restart manual.
 
 ---
@@ -207,42 +196,22 @@ radfast-status
 # Status instance tertentu
 radfast-status alice
 
-# Log realtime (_mode standar_)
-journalctl -u genieacs-alice-proxy -f
-journalctl -u genieacs-alice-ui -f
-
-# Log realtime (mode multi-proxy)
+# Log proxy realtime (semua instance)
 journalctl -u genieacs-multi-proxy -f
 
-# Restart
-systemctl restart genieacs-alice-proxy      # mode standar
-systemctl restart genieacs-multi-proxy       # mode multi-proxy
+# Log UI / CWMP realtime (1 instance)
+journalctl -u genieacs-alice-ui -f
+journalctl -u genieacs-alice-cwmp -f
+
+# Restart instance
 systemctl restart genieacs-alice-cwmp
 
-# Stop semua service 1 instance
-systemctl stop genieacs-alice-{cwmp,fs,nbi,ui,proxy}
-```
-
-### Mode Multi-Proxy
-
-```bash
-# Jalankan multi-proxy (semua instance dalam 1 proses)
-sudo radfast-multi
-# atau
-sudo node /opt/radfast_acs/multi-proxy.js
-
-# Restart multi-proxy (setelah tambah instance baru)
+# Restart proxy (semua instance)
 sudo systemctl restart genieacs-multi-proxy
 
-# Cek status multi-proxy
-sudo systemctl status genieacs-multi-proxy
-
-# Log multi-proxy realtime
-journalctl -u genieacs-multi-proxy -f
+# Stop semua service 1 instance
+systemctl stop genieacs-alice-{cwmp,fs,nbi,ui}
 ```
-
-> **Keuntungan multi-proxy:** hemat RAM karena hanya 1 proses Node.js
-> untuk semua instance logo/proxy. Perubahan logo instance tetap langsung tanpa restart.
 
 ---
 
@@ -266,10 +235,9 @@ journalctl -u genieacs-multi-proxy -f
 
 ---
 
-## 🧠 Multi-Proxy Mode — Arsitektur
+## 🧠 Arsitektur Multi-Proxy
 
-Untuk **hemat RAM**, semua instance logo/proxy bisa digabung dalam **satu proses Node.js**
-menggunakan `multi-proxy.js`.
+Semua instance logo/proxy digabung dalam **satu proses Node.js** → hemat RAM.
 
 ### Cara Kerja
 
@@ -280,65 +248,21 @@ Browser ──:3001──► genieacs-multi-proxy ──:13001──► GenieACS
 ```
 
 - 1 proses Node.js melayani **semua instance**
-- Port publik → port internal dipetakan dari `.registry`
-- Setiap instance login dengan `RADFAST_ADMIN_TOKEN` sendiri
+- Port publik → port internal dipetakan dari `.registry` (`/opt/genieacs-instances/.registry`)
 - Logo per-instance dibaca dari `/opt/genieacs-instances/{user}/logo/`
 - CSRF, rate limiter, IP blocker berjalan terisolasi per-instance
+- `radfast-add` otomatis restart `genieacs-multi-proxy` setelah instance baru ditambah
 
-### Aktifkan Mode Multi-Proxy
+### Migrasi dari Proxy Lama ke Multi-Proxy
 
-```bash
-# 1. Buat file .registry (otomatis jika sudah pakai radfast-add)
-ls -la /opt/genieacs-instances/.registry
-
-# 2. Install service systemd
-sudo tee /etc/systemd/system/genieacs-multi-proxy.service << 'EOF'
-[Unit]
-Description=RadFast ACS Multi-Instance Logo Proxy
-After=network.target
-
-[Service]
-Type=simple
-Environment=NODE_ENV=production
-ExecStart=/usr/bin/node /opt/radfast_acs/multi-proxy.js
-Restart=on-failure
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=genieacs-multi-proxy
-LimitNOFILE=65536
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# 3. Reload & start
-sudo systemctl daemon-reload
-sudo systemctl enable genieacs-multi-proxy
-sudo systemctl start genieacs-multi-proxy
-
-# 4. Verifikasi
-sudo systemctl status genieacs-multi-proxy
-journalctl -u genieacs-multi-proxy -f
-```
-
-### Migrasi dari Mode Standar ke Multi-Proxy
+Jika sebelumnya masih pakai `genieacs-{user}-proxy` per-instance:
 
 ```bash
-# 1. Stop semua proxy per-instance
-for USER in $(awk '{print $1}' /opt/genieacs-instances/.registry); do
-    sudo systemctl stop genieacs-${USER}-proxy 2>/dev/null
-    sudo systemctl disable genieacs-${USER}-proxy 2>/dev/null
-done
-
-# 2. Jalankan multi-proxy
-sudo systemctl start genieacs-multi-proxy
-
-# 3. Verifikasi semua instance aktif
-sudo systemctl status genieacs-multi-proxy
-# Contoh output:
-# [logo-proxy] :3001 → GenieACS UI :13001
-# [logo-proxy] :3002 → GenieACS UI :13002
+# Jalankan migrasi otomatis
+sudo radfast-multi
+# atau manual:
+sudo systemctl stop genieacs-${USER}-proxy
+sudo systemctl disable genieacs-${USER}-proxy
 ```
 
 ### Format .registry

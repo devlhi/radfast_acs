@@ -103,9 +103,9 @@ while IFS= read -r line; do
     # Diagnosis otomatis kalau UI down
     if [[ "$(check_http "http://${IP}:${UI}")" == "000" ]]; then
         echo -e "  ${YELLOW}  ⚠ UI down — cek:${NC}"
-        echo -e "  ${DIM}    systemctl status genieacs-${NAME}-proxy${NC}"
+        echo -e "  ${DIM}    systemctl status genieacs-multi-proxy${NC}"
         echo -e "  ${DIM}    systemctl status genieacs-${NAME}-ui${NC}"
-        echo -e "  ${DIM}    journalctl -u genieacs-${NAME}-proxy -n 20${NC}"
+        echo -e "  ${DIM}    journalctl -u genieacs-multi-proxy -n 20${NC}"
     fi
 
 done < "$REGISTRY"

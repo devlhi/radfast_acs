@@ -173,7 +173,7 @@ else
             echo -e "  ${BOLD}⚡ Manage $NAME:${NC}"
             echo -e "  ${DIM}Log UI    : journalctl -u genieacs-${NAME}-ui -f${NC}"
             echo -e "  ${DIM}Log CWMP  : journalctl -u genieacs-${NAME}-cwmp -f${NC}"
-            echo -e "  ${DIM}Restart   : systemctl restart genieacs-${NAME}-{cwmp,fs,nbi,ui,proxy}${NC}"
+            echo -e "  ${DIM}Restart   : systemctl restart genieacs-${NAME}-{cwmp,fs,nbi,ui}${NC}"
             echo -e "  ${DIM}Hapus     : sudo radfast-remove ${NAME}${NC}"
         fi
 
@@ -200,7 +200,8 @@ if [[ -z "$FILTER" ]]; then
     echo -e "  ${DIM}Tambah instance  : sudo radfast-add${NC}"
     echo -e "  ${DIM}Hapus instance   : sudo radfast-remove <user>${NC}"
     echo -e "  ${DIM}Log instance     : journalctl -u genieacs-<user>-ui -f${NC}"
-    echo -e "  ${DIM}Restart semua    : systemctl restart genieacs-<user>-{cwmp,fs,nbi,ui,proxy}${NC}"
+    echo -e "  ${DIM}Restart proxy : sudo systemctl restart genieacs-multi-proxy${NC}"
+    echo -e "  ${DIM}Restart semua : systemctl restart genieacs-<user>-{cwmp,fs,nbi,ui}${NC}"
 fi
 echo "============================================================"
 echo ""
