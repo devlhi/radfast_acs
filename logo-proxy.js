@@ -1716,6 +1716,11 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 server.on('error', err => {
+    // Di bawah multi-proxy: jangan bunuh seluruh proses (instance lain masih jalan).
+    if (process.env.RADFAST_MULTI_PROXY === '1') {
+        console.error(`[logo-proxy] :${PUBLIC_PORT} SKIP (${err.code || err.message})`);
+        return;
+    }
     console.error('[logo-proxy] Fatal:', err.message);
     process.exit(1);
 });

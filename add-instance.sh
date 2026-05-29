@@ -224,10 +224,29 @@ EOF
     success "Service genieacs-multi-proxy dibuat"
 fi
 
-# Bersihkan service proxy per-instance lama untuk user ini jika pernah ada
-rm -f "/etc/systemd/system/genieacs-${USERNAME}-proxy.service"
-systemctl disable "genieacs-${USERNAME}-proxy" &>/dev/null 2>&1 || true
-systemctl stop "genieacs-${USERNAME}-proxy" &>/dev/null 2>&1 || true
+# Bersihkan SEMUA service proxy per-instance lama (legacy mode)
+info "Membersihkan proxy per-instance lama..."
+if [[ -f "$REGISTRY" ]]; then
+    while IFS= read -r LINE; do
+        [[ -z "$LINE" ]] && continue
+        OLD_USER="$(awk '{print $1}' <<< "$LINE")"
+        [[ -z "$OLD_USER" ]] && continue
+        OLD_SVC="genieacs-${OLD_USER}-proxy"
+        systemctl stop "$OLD_SVC" &>/dev/null 2>&1 || true
+        systemctl disable "$OLD_SVC" &>/dev/null 2>&1 || true
+        rm -f "/etc/systemd/system/${OLD_SVC}.service"
+    done < "$REGISTRY"
+fi
+
+# Bersihkan orphan unit file yang mungkin tidak ada di registry
+for UNIT_FILE in /etc/systemd/system/genieacs-*-proxy.service; do
+    [[ -e "$UNIT_FILE" ]] || continue
+    UNIT_NAME="$(basename "$UNIT_FILE" .service)"
+    [[ "$UNIT_NAME" == "genieacs-multi-proxy" ]] && continue
+    systemctl stop "$UNIT_NAME" &>/dev/null 2>&1 || true
+    systemctl disable "$UNIT_NAME" &>/dev/null 2>&1 || true
+    rm -f "$UNIT_FILE"
+done
 
 systemctl daemon-reload
 systemctl enable genieacs-multi-proxy &>/dev/null 2>&1 || true

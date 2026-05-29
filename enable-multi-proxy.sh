@@ -45,10 +45,25 @@ while read -r LINE; do
     SVC="genieacs-${USER}-proxy"
     if systemctl stop "$SVC" 2>/dev/null; then
         systemctl disable "$SVC" 2>/dev/null || true
+        rm -f "/etc/systemd/system/${SVC}.service"
         success "Stop & disable $SVC"
         STOPPED=$((STOPPED + 1))
     fi
 done < "$REGISTRY"
+
+# Bersihkan orphan unit proxy per-instance yang tidak ada di registry
+for UNIT_FILE in /etc/systemd/system/genieacs-*-proxy.service; do
+    [[ -e "$UNIT_FILE" ]] || continue
+    UNIT_NAME="$(basename "$UNIT_FILE" .service)"
+    [[ "$UNIT_NAME" == "genieacs-multi-proxy" ]] && continue
+    systemctl stop "$UNIT_NAME" 2>/dev/null || true
+    systemctl disable "$UNIT_NAME" 2>/dev/null || true
+    rm -f "$UNIT_FILE"
+    success "Hapus orphan $UNIT_NAME"
+    STOPPED=$((STOPPED + 1))
+done
+
+systemctl daemon-reload
 [[ $STOPPED -eq 0 ]] && info "Tidak ada proxy per-instance yang aktif."
 
 # ── Install service systemd multi-proxy ──────────────────────

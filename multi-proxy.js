@@ -73,6 +73,7 @@ function loadInstances() {
     const logoFile = path.join(logoDir, 'custom-logo');
 
     const merged = {
+      RADFAST_MULTI_PROXY       : '1',
       RADFAST_PROXY_PORT        : envConf.RADFAST_PROXY_PORT        || r.UI,
       RADFAST_UI_INTERNAL       : envConf.RADFAST_UI_INTERNAL,
       RADFAST_LOGO_FILE         : envConf.RADFAST_LOGO_FILE         || logoFile,
