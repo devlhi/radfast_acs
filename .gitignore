@@ -46,3 +46,9 @@ public.bak-*/
 .DS_Store
 Thumbs.db
 source-deob/genieacs-app/.env
+
+# ── Local AI/test workspace ──────────────────────────────────
+.claude/
+.vscode/
+_test/
+test-nav-sim.html
