@@ -914,74 +914,75 @@ const NAV_INJECT = String.raw`<script>
   /* ESC key */
   document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeModal(); });
 
-  /* ── Posisikan tombol tepat di samping kanan logo ── */
-  /* Pakai position:fixed (di-attach ke <html>, di luar kontrol Mithril) */
-  /* lalu hitung koordinat berdasar bounding-rect logo → tidak terhapus re-render */
-  function alignToLogo(b){
-    var logo = document.querySelector('#header .logo');
-    var hdr  = document.getElementById('header');
-    if(!logo || !hdr){
-      b.style.top='10px'; b.style.left='14px'; b.style.right='auto';
-      return;
-    }
-    var lr = logo.getBoundingClientRect();
-    var hr = hdr.getBoundingClientRect();
-    // Tengah vertikal terhadap tinggi logo
-    var btnH = 22;
-    var top  = Math.round(lr.top + (lr.height - btnH) / 2);
-    b.style.top    = top + 'px';
-    b.style.left   = Math.round(lr.right + 6) + 'px';
-    b.style.right  = 'auto';
-    b.style.height = btnH + 'px';
-    b.style.lineHeight = btnH + 'px';
+  /* ── Posisikan tombol SEJAJAR dengan tab nav (Overview, dll) ── */
+  /* MutationObserver handle Mithril re-render otomatis */
+  function alignToNav(b){
+    // Cari elemen tab pertama (Overview atau link pertama di header)
+    var nav = document.querySelector('#header a[href*="overview"]')
+           || document.querySelector('#header nav a')
+           || document.querySelector('#header ul a')
+           || document.querySelector('#header a');
+    if(!nav){ b.style.display='none'; return; }
+    var nr = nav.getBoundingClientRect();
+    var btnH = nr.height || 22;
+    // Tampilkan dulu agar offsetWidth terukur, tapi posisikan tepat
+    b.style.opacity   = '0';          // invisible dulu saat measure
+    b.style.display   = '';
+    b.style.position  = 'fixed';
+    b.style.top       = Math.round(nr.top + (nr.height - btnH) / 2) + 'px';
+    b.style.height    = btnH + 'px';
+    b.style.lineHeight= btnH + 'px';
+    b.style.right     = 'auto';
+    // offsetWidth baru terukur setelah display bukan none
+    var bw = b.offsetWidth || 100;    // fallback 100px kalau belum ready
+    b.style.left      = Math.max(4, Math.round(nr.left - bw - 8)) + 'px';
+    b.style.opacity   = '1';          // tampilkan setelah posisi dihitung
   }
 
-  /* ── Inject / hapus nav button sesuai halaman ── */
   function syncBtn(){
     var onLogin = !!document.querySelector('input[type="password"]');
     var btn = document.getElementById('rf-nav-btn');
     if(onLogin){
-      if(btn) btn.style.display = 'none';
+      if(btn) btn.style.display='none';
       return;
     }
-    if(btn){
-      btn.style.display = '';
-      alignToLogo(btn);
-      return;
+    if(!btn){
+      btn = document.createElement('span');
+      btn.id = 'rf-nav-btn';
+      btn.setAttribute('style',
+        'position:fixed;z-index:2147483647;display:none;' +
+        'background:#c0392b;color:#fff;border-radius:3px;padding:0 8px;' +
+        'font-weight:bold;font-size:11px;font-family:Arial,sans-serif;' +
+        'user-select:none;white-space:nowrap;cursor:pointer;' +
+        'letter-spacing:0.3px;box-shadow:0 1px 3px rgba(0,0,0,.25);'
+      );
+      btn.innerHTML='\u270E Ganti Logo';
+      btn.addEventListener('click', function(e){
+        e.preventDefault(); e.stopPropagation(); openModal();
+      });
+      document.documentElement.appendChild(btn);
     }
-    var b = document.createElement('span');
-    b.id = 'rf-nav-btn';
-    b.setAttribute('style',
-      'position:fixed;top:10px;left:14px;z-index:2147483647;' +
-      'background:#c0392b;color:#fff;border-radius:3px;padding:0 8px;' +
-      'font-weight:bold;font-size:11px;font-family:Arial,sans-serif;' +
-      'user-select:none;white-space:nowrap;cursor:pointer;' +
-      'letter-spacing:0.3px;box-shadow:0 1px 3px rgba(0,0,0,.25);'
-    );
-    b.innerHTML='\u270E Ganti Logo';
-    b.addEventListener('click', function(e){
-      e.preventDefault(); e.stopPropagation(); openModal();
-    });
-    // Attach ke <html> — di luar Mithril root, tidak terhapus re-render
-    document.documentElement.appendChild(b);
-    // Tunggu Mithril render logo (bisa delay 1 frame)
-    requestAnimationFrame(function(){ alignToLogo(b); });
+    alignToNav(btn);
   }
 
-  /* ── Startup ── */
-  window.addEventListener('load', function(){
+  /* ── Startup: MutationObserver + resize listener ── */
+  function startBtn(){
     syncBtn();
-    // Mithril render logo async — cek berkala selama 2 detik pertama
-    var cnt=0, iv=setInterval(function(){
-      syncBtn();
-      if(++cnt>=20 || document.querySelector('#header .logo')) clearInterval(iv);
-    },100);
-    window.addEventListener('hashchange', function(){ setTimeout(syncBtn, 60); });
-    window.addEventListener('resize',     function(){
-      var btn=document.getElementById('rf-nav-btn');
-      if(btn&&btn.style.display!=='none') alignToLogo(btn);
-    });
-  });
+    // Observer deteksi Mithril render ulang header → realign tombol
+    var lastHdr = null;
+    var observer = new MutationObserver(function(){ syncBtn(); });
+    var hdr = document.getElementById('header');
+    if(hdr){ observer.observe(hdr, {childList:true, subtree:true}); lastHdr=hdr; }
+    // Juga watch body untuk case header muncul lambat
+    observer.observe(document.body, {childList:true, subtree:true});
+    // Resize listener
+    window.addEventListener('resize', function(){ syncBtn(); });
+  }
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded', startBtn);
+  } else {
+    startBtn();
+  }
 
   // Handle direct URL /__admin/logo
   if(location.pathname==='/__admin/logo'){
@@ -1139,10 +1140,37 @@ let _jsPatch   = null;    // { buf: Buffer, etag: string }
 let _origSVG   = null;    // { w, h, viewBox } dimensi SVG asli GenieACS
 let _svgPreview = { buf: null, tag: null };  // cache preview SVG logo
 
+// ── Cache logo di memory → serve instan, tidak re-read disk tiap request ──
+// Didefinisikan SEKALI di module scope (bukan per-request).
+let _logoMemCache = { buf: null, ext: null, etag: null };
+function refreshLogoMemCache() {
+    const custom = findCustomLogo();
+    if (!custom) { _logoMemCache = { buf: null, ext: null, etag: null }; return; }
+    try {
+        const buf  = fs.readFileSync(custom);
+        const ext  = path.extname(custom).toLowerCase();
+        const st   = fs.statSync(custom);
+        const etag = '"' + st.size.toString(16) + '-' + st.mtimeMs.toString(16) + '"';
+        _logoMemCache = { buf, ext, etag };
+        console.log(`[logo] mem-cache refreshed: ${custom} (${buf.length} bytes)`);
+    } catch(e) { _logoMemCache = { buf: null, ext: null, etag: null }; }
+}
+// Load awal + watch perubahan file (debounce 1s)
+refreshLogoMemCache();
+let _logoWatchTimer = null;
+try {
+    const _watchDir = path.dirname(process.env.RADFAST_LOGO_FILE || '/tmp/radfast-logo');
+    fs.watch(_watchDir, function(){
+        clearTimeout(_logoWatchTimer);
+        _logoWatchTimer = setTimeout(refreshLogoMemCache, 1000);
+    });
+} catch(_){}
+
 function clearJSPatch() {
     _jsPatch = null;
     _svgPreview = { buf: null, tag: null };  // clear preview cache juga
-    console.log('[logo-patch] JS patch + preview cache cleared');
+    refreshLogoMemCache();                   // refresh logo mem-cache juga
+    console.log('[logo-patch] JS patch + preview + logo mem-cache cleared');
 }
 
 function patchLogoInJS(jsStr) {
@@ -1630,34 +1658,31 @@ const server = http.createServer((req, res) => {
     // jadi URL-nya TANPA prefix /public/, contoh:
     //   /logo-3976e73d.svg   (logo utama, di-referensikan var Mo di bundle)
     //   /logo-white.svg, /logo.svg, /public/logo.svg (varian)
+    // ── Logo HTTP intercept ──────────────────────────────
     // Tangkap path apapun yang ada kata "logo" + ekstensi gambar,
     // dengan ATAU tanpa prefix /public/.
     const isLogoReq = /(?:^|\/)[^/?]*logo[^/?]*\.(svg|png|jpe?g|gif|webp|ico|bmp)(?:\?|$)/i.test(req.url);
     if (isLogoReq) {
-        const custom = findCustomLogo();
-        if (custom) {
-            const ext = path.extname(custom).toLowerCase();
-            let etag = '';
-            try {
-                const st = fs.statSync(custom);
-                etag = '"' + st.size.toString(16) + '-' + st.mtimeMs.toString(16) + '"';
-            } catch (_) {}
-            // Browser sudah punya versi sama? → 304, tidak re-download (cegah flash)
+        if (_logoMemCache.buf) {
+            const etag = _logoMemCache.etag;
+            const mime = MIME[_logoMemCache.ext] || 'image/svg+xml';
+            // Browser sudah punya versi sama? → 304 (0 bytes, instant)
             if (etag && req.headers['if-none-match'] === etag) {
-                res.writeHead(304, { 'ETag': etag, 'Cache-Control': 'public, max-age=60' });
+                res.writeHead(304, { 'ETag': etag, 'Cache-Control': 'public, max-age=31536000, immutable' });
                 res.end();
                 return;
             }
-            console.log(`[logo] intercept ${req.url} → serve custom: ${custom}`);
+            console.log(`[logo] intercept ${req.url} → serve from mem-cache (${_logoMemCache.buf.length}b)`);
             res.writeHead(200, {
-                'Content-Type'          : MIME[ext] || 'image/svg+xml',
-                // max-age pendek + ETag: browser pakai cache → tidak flash saat
-                // Mithril re-render header, tapi tetap deteksi perubahan logo.
-                'Cache-Control'         : 'public, max-age=60, must-revalidate',
+                'Content-Type'          : mime,
+                'Content-Length'         : _logoMemCache.buf.length,
+                // immutable + 1tahun: browser TIDAK akan re-request selama ETag sama
+                // → no-flash. Saat logo diganti → ETag beda → browser download sekali.
+                'Cache-Control'         : 'public, max-age=31536000, immutable',
                 'X-Content-Type-Options': 'nosniff',
                 ...(etag ? { 'ETag': etag } : {})
             });
-            fs.createReadStream(custom).pipe(res);
+            res.end(_logoMemCache.buf);  // end() langsung dari memory, 0ms latency
             return;
         }
         // Tidak ada custom logo → pass-through ke GenieACS (logo default)
