@@ -1117,7 +1117,7 @@ function injectNavLink(html) {
 /* Override posisi logo+versi — pastikan versi di bawah logo, rata kiri */
 #header>.logo                { display:inline-flex!important;flex-direction:column!important;align-items:flex-start!important;position:relative!important;vertical-align:top!important;padding-bottom:10px!important;gap:0!important }
 #header>.logo>img            { margin:10px!important;margin-bottom:0!important;height:56px!important;width:auto!important;object-fit:contain!important;vertical-align:top!important }
-#header>.logo>.version      { position:absolute!important;bottom:0!important;left:12px!important;right:auto!important;top:auto!important;font-family:monospace!important;font-size:10px!important;color:#666!important;line-height:1!important;white-space:nowrap!important;transform:none!important;letter-spacing:0!important }
+#header>.logo>.version      { position:absolute!important;bottom:0!important;left:auto!important;right:10px!important;top:auto!important;font-family:monospace!important;font-size:10px!important;color:#666!important;line-height:1!important;white-space:nowrap!important;transform:none!important;letter-spacing:0!important }
 </style>` : '';
     const headInject = COOKIE_WRAPPER + LOGO_CSS;
 
