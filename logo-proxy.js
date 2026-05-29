@@ -1650,6 +1650,27 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    // ── Hard block: NBI API paths tanpa secret path ────────
+    // Jika seseorang coba akses /devices, /tasks dst langsung di port publik
+    // tanpa lewat SECRET PATH → tolak 403. Ini defense-in-depth karena
+    // NBI juga sudah di-bind ke 127.0.0.1 (tidak bisa dari luar).
+    // Catatan: UI GenieACS pakai prefix /api/... jadi TIDAK kena blok ini.
+    const NBI_BLOCKED = [
+        /^\/devices(\/|$|\?)/,
+        /^\/tasks(\/|$|\?)/,
+        /^\/presets(\/|$|\?)/,
+        /^\/provisions(\/|$|\?)/,
+        /^\/faults(\/|$|\?)/,
+        /^\/files(\/|$|\?)/,
+        /^\/fault_codes(\/|$|\?)/
+    ];
+    if (NBI_BLOCKED.some(re => re.test(url))) {
+        auditLog('NBI-BLOCK', ip, `${req.method} ${url} — akses langsung tanpa secret path`);
+        sendSecure(res, 403, 'application/json',
+            '{"error":"Forbidden — NBI API hanya bisa diakses lewat secret path"}');
+        return;
+    }
+
     // ── Admin: tampilkan form ──────────────────────────────
     if (url === '/__admin/logo') {
         const authed = isGenieSession(req);
