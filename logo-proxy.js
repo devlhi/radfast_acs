@@ -25,8 +25,11 @@ const PUBLIC_PORT  = parseInt(process.env.RADFAST_PROXY_PORT       || 3001);
 const GENIE_PORT   = parseInt(process.env.RADFAST_UI_INTERNAL      || 13001);
 const NBI_PORT     = parseInt(process.env.GENIEACS_NBI_PORT        || 7558);
 // Secret path untuk akses NBI (REST API GenieACS) lewat port UI publik ini.
-// Kosong = gate NBI nonaktif. Di-set per instance via .env (RADFAST_NBI_GATE_PATH).
-const NBI_GATE_PATH_INIT = (process.env.RADFAST_NBI_GATE_PATH || '').trim().replace(/\/+$/, '');
+// Di-set per instance via .env (RADFAST_NBI_GATE_PATH).
+// JIKA KOSONG — otomatis di-generate saat startup (tidak pernah nonaktif).
+const NBI_GATE_PATH_INIT = (process.env.RADFAST_NBI_GATE_PATH || '').trim().replace(/\/+$/, '')
+    || `/_acs-${crypto.randomBytes(20).toString('hex')}`;
+const NBI_GATE_AUTO_GENERATED = !(process.env.RADFAST_NBI_GATE_PATH || '').trim();
 // Batas maksimum perubahan secret via dashboard (0 = unlimited)
 const NBI_GATE_MAX_CHANGES = parseInt(process.env.RADFAST_NBI_GATE_MAX_CHANGES || '3', 10);
 // State runtime
@@ -929,6 +932,8 @@ const NAV_INJECT = String.raw`<script>
   }
 
   function apiUrlFromPath(path){ return location.protocol+'//'+location.host+(path||''); }
+  // URL lengkap siap-copy ke RadFastBill (langsung ke endpoint /devices)
+  function apiUrlFull(path){ return path ? (apiUrlFromPath(path)+'/devices') : ''; }
   function apiMsg(el, cls, txt){
     el.style.display='block';
     el.style.background=cls==='ok'?'#dff0d8':'#f2dede';
@@ -964,9 +969,12 @@ const NAV_INJECT = String.raw`<script>
 
     var body=document.createElement('div'); body.style.cssText='padding:16px;';
     body.innerHTML = '<div id="rf-api-msg" style="display:none;padding:8px 10px;border-radius:3px;margin-bottom:10px;font-size:13px"></div>'+
-      '<div style="font-size:13px;color:#444;margin-bottom:10px">Cek dulu URL API yang aktif. URL ini yang dipakai di GoRadius / Billing.</div>'+
-      '<label style="display:block;font-size:12px;font-weight:bold;color:#555;margin-bottom:4px">URL API lengkap</label>'+
-      '<div id="rf-api-url" style="font-family:monospace;font-size:13px;word-break:break-all;background:#f7f9fb;border:1px solid #dce4ea;border-radius:4px;padding:9px;margin-bottom:10px">Belum dicek</div>'+
+      '<div style="font-size:13px;color:#444;margin-bottom:10px">Cek dulu URL API yang aktif. URL ini yang dipakai di RadFastBill.</div>'+
+      '<label style="display:block;font-size:12px;font-weight:bold;color:#555;margin-bottom:4px">URL API lengkap (siap copy ke RadFastBill)</label>'+
+      '<div style="display:flex;gap:6px;margin-bottom:10px">'+
+        '<div id="rf-api-url" style="flex:1;font-family:monospace;font-size:13px;word-break:break-all;background:#f7f9fb;border:1px solid #dce4ea;border-radius:4px;padding:9px">Belum dicek</div>'+
+        '<button id="rf-api-copy" class="rf-btn" style="background:#16a085;color:#fff;white-space:nowrap">📋 Copy</button>'+
+      '</div>'+
       '<label style="display:block;font-size:12px;font-weight:bold;color:#555;margin-bottom:4px">Secret Path</label>'+
       '<input id="rf-api-secret" readonly style="width:100%;box-sizing:border-box;font-family:monospace;font-size:13px;background:#fafafa;border:1px solid #ddd;border-radius:4px;padding:8px;margin-bottom:10px" value="Belum dicek">'+
       '<label style="display:block;font-size:12px;font-weight:bold;color:#555;margin-bottom:4px">Token Admin (opsional kalau sudah login)</label>'+
@@ -976,7 +984,7 @@ const NAV_INJECT = String.raw`<script>
         '<button id="rf-api-change" class="rf-btn" style="background:#2980b9;color:#fff">🔄 Ganti Secret</button>'+
         '<button id="rf-api-reset" class="rf-btn rf-rm">♻ Reset</button>'+
       '</div>'+
-      '<div id="rf-api-note" style="font-size:12px;color:#888;margin-top:10px;line-height:1.4">Ganti secret maksimal 3× per restart instance. Setelah secret diganti, update URL ini di GoRadius.</div>';
+      '<div id="rf-api-note" style="font-size:12px;color:#888;margin-top:10px;line-height:1.4">Ganti secret maksimal 3× per restart instance. Setelah secret diganti, update URL ini di RadFastBill.</div>';
 
     box.appendChild(head); box.appendChild(body); bd.appendChild(box);
     var msg=body.querySelector('#rf-api-msg');
@@ -986,6 +994,7 @@ const NAV_INJECT = String.raw`<script>
     var check=body.querySelector('#rf-api-check');
     var change=body.querySelector('#rf-api-change');
     var reset=body.querySelector('#rf-api-reset');
+    var copy=body.querySelector('#rf-api-copy');
 
     function call(action){
       return fetch('/__admin/api/nbi-key',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:action,token:token.value||''})}).then(function(r){return r.json();});
@@ -993,10 +1002,12 @@ const NAV_INJECT = String.raw`<script>
     function render(d){
       if(!d.ok){ apiMsg(msg,'er',d.error||'Gagal cek API URL'); return; }
       secret.value=d.secretPath||'(NBI gate nonaktif)';
-      url.textContent=d.secretPath?apiUrlFromPath(d.secretPath):'(NBI gate nonaktif)';
+      url.textContent=d.secretPath?apiUrlFull(d.secretPath):'(NBI gate nonaktif)';
       change.disabled=(d.maxChanges>0 && d.changesLeft<=0);
       change.textContent=d.maxChanges>0?'🔄 Ganti Secret (sisa '+d.changesLeft+'/'+d.maxChanges+')':'🔄 Ganti Secret';
-      apiMsg(msg,'ok','URL berhasil dicek. Salin URL ini ke GoRadius / Billing.');
+      apiMsg(msg,'ok',d.autoGenerated
+        ? 'URL berhasil dibuat otomatis. Salin URL ini ke RadFastBill. Catatan: tambahkan RADFAST_NBI_GATE_PATH ke .env agar tetap sama setelah restart.'
+        : 'URL berhasil dicek. Salin URL ini ke RadFastBill.');
     }
     function checkInfo(){
       msg.style.display='none'; url.textContent='Mengecek...'; secret.value='Mengecek...';
@@ -1006,12 +1017,24 @@ const NAV_INJECT = String.raw`<script>
     change.addEventListener('click',function(e){
       e.preventDefault();
       if(!confirm('Ganti secret NBI? URL lama langsung tidak berlaku.')) return;
-      call('regenerate').then(function(d){ render(d); if(d.ok) apiMsg(msg,'ok','Secret diganti. Update URL baru ini di GoRadius.'); }).catch(function(){apiMsg(msg,'er','Gagal ganti secret.');});
+      call('regenerate').then(function(d){ render(d); if(d.ok) apiMsg(msg,'ok','Secret diganti. Update URL baru ini di RadFastBill.'); }).catch(function(){apiMsg(msg,'er','Gagal ganti secret.');});
     });
     reset.addEventListener('click',function(e){
       e.preventDefault();
       if(!confirm('Reset secret ke nilai awal dari .env?')) return;
       call('reset').then(function(d){ render(d); if(d.ok) apiMsg(msg,'ok','Secret direset ke awal.'); }).catch(function(){apiMsg(msg,'er','Gagal reset secret.');});
+    });
+    copy.addEventListener('click',function(e){
+      e.preventDefault();
+      var txt=url.textContent||'';
+      if(!txt || txt.indexOf('http')!==0){ apiMsg(msg,'er','Cek URL dulu sebelum copy.'); return; }
+      function done(){ apiMsg(msg,'ok','URL tersalin: '+txt); }
+      function fallback(){
+        try{ secret.focus(); var ta=document.createElement('textarea'); ta.value=txt; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); done(); }
+        catch(ex){ apiMsg(msg,'er','Gagal copy otomatis. Salin manual: '+txt); }
+      }
+      if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(done).catch(fallback); }
+      else { fallback(); }
     });
     bd._rfCheckInfo = checkInfo;
     _apiModal=bd;
@@ -1570,7 +1593,8 @@ const server = http.createServer((req, res) => {
                         secretPath: nbiGateCurrentPath,
                         originalPath: nbiGateOriginalPath,
                         changesLeft: nbiGateChangesLeft,
-                        maxChanges: NBI_GATE_MAX_CHANGES
+                        maxChanges: NBI_GATE_MAX_CHANGES,
+                        autoGenerated: NBI_GATE_AUTO_GENERATED
                     }));
                     return;
                 }
