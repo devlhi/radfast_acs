@@ -952,10 +952,11 @@ const NAV_INJECT = String.raw`<script>
     var b = document.createElement('span');
     b.id = 'rf-nav-btn';
     b.setAttribute('style',
-      'background:#c0392b;color:#fff;border-radius:3px;padding:2px 8px;' +
+      'position:fixed;top:10px;left:14px;z-index:2147483647;' +
+      'background:#c0392b;color:#fff;border-radius:3px;padding:0 8px;' +
       'font-weight:bold;font-size:11px;font-family:Arial,sans-serif;' +
-      'user-select:none;white-space:nowrap;cursor:pointer;vertical-align:middle;' +
-      'letter-spacing:0.3px;'
+      'user-select:none;white-space:nowrap;cursor:pointer;' +
+      'letter-spacing:0.3px;box-shadow:0 1px 3px rgba(0,0,0,.25);'
     );
     b.innerHTML='\u270E Ganti Logo';
     b.addEventListener('click', function(e){
@@ -1636,14 +1637,25 @@ const server = http.createServer((req, res) => {
         const custom = findCustomLogo();
         if (custom) {
             const ext = path.extname(custom).toLowerCase();
-            // Log untuk debug
+            let etag = '';
+            try {
+                const st = fs.statSync(custom);
+                etag = '"' + st.size.toString(16) + '-' + st.mtimeMs.toString(16) + '"';
+            } catch (_) {}
+            // Browser sudah punya versi sama? → 304, tidak re-download (cegah flash)
+            if (etag && req.headers['if-none-match'] === etag) {
+                res.writeHead(304, { 'ETag': etag, 'Cache-Control': 'public, max-age=60' });
+                res.end();
+                return;
+            }
             console.log(`[logo] intercept ${req.url} → serve custom: ${custom}`);
             res.writeHead(200, {
                 'Content-Type'          : MIME[ext] || 'image/svg+xml',
-                'Cache-Control'         : 'no-store, no-cache, must-revalidate',
-                'Pragma'                : 'no-cache',
-                'Expires'               : '0',
-                'X-Content-Type-Options': 'nosniff'
+                // max-age pendek + ETag: browser pakai cache → tidak flash saat
+                // Mithril re-render header, tapi tetap deteksi perubahan logo.
+                'Cache-Control'         : 'public, max-age=60, must-revalidate',
+                'X-Content-Type-Options': 'nosniff',
+                ...(etag ? { 'ETag': etag } : {})
             });
             fs.createReadStream(custom).pipe(res);
             return;
