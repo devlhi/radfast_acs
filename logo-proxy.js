@@ -916,27 +916,29 @@ const NAV_INJECT = String.raw`<script>
 
   /* ── Posisikan tombol SEJAJAR dengan tab nav (Overview, dll) ── */
   /* MutationObserver handle Mithril re-render otomatis */
+  /* ── Posisikan tombol di KANAN logo, SEJAJAR vertikal dengan tab nav ── */
   function alignToNav(b){
-    // Cari elemen tab pertama (Overview atau link pertama di header)
-    var nav = document.querySelector('#header a[href*="overview"]')
-           || document.querySelector('#header nav a')
-           || document.querySelector('#header ul a')
-           || document.querySelector('#header a');
-    if(!nav){ b.style.display='none'; return; }
+    var logo = document.querySelector('#header .logo');
+    var nav  = document.querySelector('#header a[href*="overview"]')
+            || document.querySelector('#header nav a')
+            || document.querySelector('#header a');
+    if(!logo || !nav){ b.style.display='none'; return; }
+    var lr = logo.getBoundingClientRect();
     var nr = nav.getBoundingClientRect();
     var btnH = nr.height || 22;
-    // Tampilkan dulu agar offsetWidth terukur, tapi posisikan tepat
-    b.style.opacity   = '0';          // invisible dulu saat measure
+    // Tampilkan dulu agar offsetWidth terukur
+    b.style.opacity   = '0';
     b.style.display   = '';
     b.style.position  = 'fixed';
+    // Vertikal: sejajar dengan tab (bukan tengah logo)
     b.style.top       = Math.round(nr.top + (nr.height - btnH) / 2) + 'px';
+    // Horizontal: tepat di kanan logo + 6px gap
+    b.style.left      = Math.round(lr.right + 6) + 'px';
+    b.style.right     = 'auto';
     b.style.height    = btnH + 'px';
     b.style.lineHeight= btnH + 'px';
-    b.style.right     = 'auto';
-    // offsetWidth baru terukur setelah display bukan none
-    var bw = b.offsetWidth || 100;    // fallback 100px kalau belum ready
-    b.style.left      = Math.max(4, Math.round(nr.left - bw - 8)) + 'px';
-    b.style.opacity   = '1';          // tampilkan setelah posisi dihitung
+    // Tampilkan setelah posisi dihitung
+    b.style.opacity   = '1';
   }
 
   function syncBtn(){
