@@ -914,41 +914,26 @@ const NAV_INJECT = String.raw`<script>
   /* ESC key */
   document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeModal(); });
 
-  /* ── Sejajarkan tombol dengan nav bar GenieACS ── */
-  function alignToNav(b){
-    var NAV_TEXTS = ['Overview','Devices','Faults','Admin'];
-    var tabs = [];
-    var anchors = document.querySelectorAll('a');
-    for(var i=0;i<anchors.length;i++){
-      if(NAV_TEXTS.indexOf(anchors[i].textContent.trim())>=0) tabs.push(anchors[i]);
-    }
-    if(!tabs.length){
-      // Fallback: sudut kanan atas
-      b.style.top='8px'; b.style.right='12px'; b.style.left='auto';
-      b.style.height='auto'; b.style.lineHeight='1.5'; b.style.padding='6px 14px';
-      b.style.borderRadius='5px'; b.style.boxShadow='0 2px 8px rgba(0,0,0,.4)';
+  /* ── Posisikan tombol tepat di samping kanan logo ── */
+  /* Pakai position:fixed (di-attach ke <html>, di luar kontrol Mithril) */
+  /* lalu hitung koordinat berdasar bounding-rect logo → tidak terhapus re-render */
+  function alignToLogo(b){
+    var logo = document.querySelector('#header .logo');
+    var hdr  = document.getElementById('header');
+    if(!logo || !hdr){
+      b.style.top='10px'; b.style.left='14px'; b.style.right='auto';
       return;
     }
-    // Cari container nav (parent dengan ≥3 anak atau elemen UL/NAV)
-    var last = tabs[tabs.length-1];
-    var nav  = last.parentElement;
-    for(var n=0;n<6;n++){
-      if(!nav||nav===document.body) break;
-      var tag=nav.tagName;
-      if(tag==='UL'||tag==='NAV'||nav.children.length>=3) break;
-      nav = nav.parentElement;
-    }
-    var navRect  = (nav&&nav!==document.body) ? nav.getBoundingClientRect() : last.getBoundingClientRect();
-    var lastRect = last.getBoundingClientRect();
-    var h = Math.round(navRect.height)||32;
-    b.style.top          = Math.round(navRect.top)+'px';
-    b.style.left         = Math.round(lastRect.right+2)+'px';
-    b.style.right        = 'auto';
-    b.style.height       = h+'px';
-    b.style.lineHeight   = h+'px';
-    b.style.padding      = '0 12px';
-    b.style.borderRadius = '0';
-    b.style.boxShadow    = 'none';
+    var lr = logo.getBoundingClientRect();
+    var hr = hdr.getBoundingClientRect();
+    // Tengah vertikal terhadap tinggi logo
+    var btnH = 22;
+    var top  = Math.round(lr.top + (lr.height - btnH) / 2);
+    b.style.top    = top + 'px';
+    b.style.left   = Math.round(lr.right + 6) + 'px';
+    b.style.right  = 'auto';
+    b.style.height = btnH + 'px';
+    b.style.lineHeight = btnH + 'px';
   }
 
   /* ── Inject / hapus nav button sesuai halaman ── */
@@ -961,34 +946,39 @@ const NAV_INJECT = String.raw`<script>
     }
     if(btn){
       btn.style.display = '';
-      alignToNav(btn);
+      alignToLogo(btn);
       return;
     }
-    var b = document.createElement('div');
+    var b = document.createElement('span');
     b.id = 'rf-nav-btn';
     b.setAttribute('style',
-      'position:fixed;top:8px;right:12px;z-index:2147483647;' +
-      'cursor:pointer;background:#c0392b;color:#fff;' +
-      'border-radius:5px;padding:6px 14px;font-weight:bold;font-size:13px;' +
-      'font-family:Arial,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.4);' +
-      'user-select:none;white-space:nowrap;'
+      'background:#c0392b;color:#fff;border-radius:3px;padding:2px 8px;' +
+      'font-weight:bold;font-size:11px;font-family:Arial,sans-serif;' +
+      'user-select:none;white-space:nowrap;cursor:pointer;vertical-align:middle;' +
+      'letter-spacing:0.3px;'
     );
-    b.textContent = '🖼 Ganti Logo';
+    b.innerHTML='\u270E Ganti Logo';
     b.addEventListener('click', function(e){
       e.preventDefault(); e.stopPropagation(); openModal();
     });
+    // Attach ke <html> — di luar Mithril root, tidak terhapus re-render
     document.documentElement.appendChild(b);
-    alignToNav(b);
+    // Tunggu Mithril render logo (bisa delay 1 frame)
+    requestAnimationFrame(function(){ alignToLogo(b); });
   }
 
   /* ── Startup ── */
   window.addEventListener('load', function(){
     syncBtn();
-    // hashchange: tunggu 60ms agar Mithril selesai render sebelum re-align
+    // Mithril render logo async — cek berkala selama 2 detik pertama
+    var cnt=0, iv=setInterval(function(){
+      syncBtn();
+      if(++cnt>=20 || document.querySelector('#header .logo')) clearInterval(iv);
+    },100);
     window.addEventListener('hashchange', function(){ setTimeout(syncBtn, 60); });
     window.addEventListener('resize',     function(){
       var btn=document.getElementById('rf-nav-btn');
-      if(btn&&btn.style.display!=='none') alignToNav(btn);
+      if(btn&&btn.style.display!=='none') alignToLogo(btn);
     });
   });
 
