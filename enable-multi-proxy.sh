@@ -91,12 +91,30 @@ while read -r LINE; do
     set_env_value "$ENV_FILE" "GENIEACS_NBI_WORKER_PROCESSES" "1"
     set_env_value "$ENV_FILE" "GENIEACS_FS_WORKER_PROCESSES" "1"
     set_env_value "$ENV_FILE" "GENIEACS_UI_WORKER_PROCESSES" "1"
-    success "$USER worker=1"
+    set_env_value "$ENV_FILE" "NODE_OPTIONS" '"--max-old-space-size=120 --max-semi-space-size=2"'
+    success "$USER worker=1 + node heap cap"
     PATCHED=$((PATCHED + 1))
 done < "$REGISTRY"
 
 if [[ $PATCHED -gt 0 ]]; then
-    info "Restart core services agar worker limit aktif..."
+    info "Memasang MemoryMax=160M untuk core services..."
+    while read -r LINE; do
+        [[ -z "$LINE" ]] && continue
+        USER="$(awk '{print $1}' <<< "$LINE")"
+        [[ -z "$USER" ]] && continue
+        for SVC in cwmp fs nbi ui; do
+            DROPIN_DIR="/etc/systemd/system/genieacs-${USER}-${SVC}.service.d"
+            mkdir -p "$DROPIN_DIR"
+            cat > "$DROPIN_DIR/limits.conf" <<EOF
+[Service]
+MemoryAccounting=true
+MemoryMax=160M
+EOF
+        done
+    done < "$REGISTRY"
+
+    systemctl daemon-reload
+    info "Restart core services agar worker/heap/memory limit aktif..."
     while read -r LINE; do
         [[ -z "$LINE" ]] && continue
         USER="$(awk '{print $1}' <<< "$LINE")"
@@ -117,12 +135,15 @@ After=network.target
 [Service]
 Type=simple
 Environment=NODE_ENV=production
+Environment=NODE_OPTIONS=--max-old-space-size=192 --max-semi-space-size=4
 Environment=RADFAST_INSTANCES_DIR=${INSTANCES_DIR}
 Environment=RADFAST_REGISTRY=${REGISTRY}
 Environment=RADFAST_PROXY_SCRIPT=${REPO_DIR}/logo-proxy.js
 ExecStart=${NODE_BIN} ${MULTI_SCRIPT}
 Restart=on-failure
 RestartSec=5
+MemoryAccounting=true
+MemoryMax=256M
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=genieacs-multi-proxy

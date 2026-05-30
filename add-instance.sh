@@ -133,6 +133,10 @@ GENIEACS_NBI_WORKER_PROCESSES=1
 GENIEACS_FS_WORKER_PROCESSES=1
 GENIEACS_UI_WORKER_PROCESSES=1
 
+# Batasi heap V8 Node.js agar 20+ instance tidak menghabiskan RAM.
+# Aman untuk instance kecil/menengah; naikkan ke 160/256 jika device sangat padat.
+NODE_OPTIONS="--max-old-space-size=120 --max-semi-space-size=2"
+
 # Bind NBI ke localhost saja. NBI = REST API TANPA auth bawaan.
 # Port NBI TIDAK dibuka ke publik; akses publik HANYA lewat secret path di
 # port UI (logo-proxy meneruskan {RADFAST_NBI_GATE_PATH}/... → 127.0.0.1:${NBI_PORT}).
@@ -202,6 +206,8 @@ EnvironmentFile=${INST_DIR}/.env
 ExecStart=${NODE_BIN} ${APP_DIR}/bin/genieacs-${SVC}
 Restart=on-failure
 RestartSec=5
+MemoryAccounting=true
+MemoryMax=160M
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=genieacs-${USERNAME}-${SVC}
@@ -228,12 +234,15 @@ After=network.target
 [Service]
 Type=simple
 Environment=NODE_ENV=production
+Environment=NODE_OPTIONS=--max-old-space-size=192 --max-semi-space-size=4
 Environment=RADFAST_INSTANCES_DIR=${INSTANCES_DIR}
 Environment=RADFAST_REGISTRY=${REGISTRY}
 Environment=RADFAST_PROXY_SCRIPT=${PROXY_SCRIPT}
 ExecStart=${NODE_BIN} ${MULTI_SCRIPT}
 Restart=on-failure
 RestartSec=5
+MemoryAccounting=true
+MemoryMax=256M
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=genieacs-multi-proxy
