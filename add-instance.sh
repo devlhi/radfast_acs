@@ -124,6 +124,15 @@ GENIEACS_UI_PORT=${UI_INTERNAL}
 GENIEACS_FS_HOSTNAME=${SERVER_IP}
 GENIEACS_UI_JWT_SECRET=${JWT_SECRET}
 
+# ── Batas worker per service (HEMAT CPU & RAM) ──────────────
+# Default GenieACS = max(2, jumlah CPU) worker PER service. Di VPS 4-core
+# itu jadi 4 service x 4 worker = 16 proses node per instance → bengkak.
+# Dikunci ke 1 worker/service: tiap instance cukup 4 proses node saja.
+GENIEACS_CWMP_WORKER_PROCESSES=1
+GENIEACS_NBI_WORKER_PROCESSES=1
+GENIEACS_FS_WORKER_PROCESSES=1
+GENIEACS_UI_WORKER_PROCESSES=1
+
 # Bind NBI ke localhost saja. NBI = REST API TANPA auth bawaan.
 # Port NBI TIDAK dibuka ke publik; akses publik HANYA lewat secret path di
 # port UI (logo-proxy meneruskan {RADFAST_NBI_GATE_PATH}/... → 127.0.0.1:${NBI_PORT}).

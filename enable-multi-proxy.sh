@@ -66,6 +66,47 @@ done
 systemctl daemon-reload
 [[ $STOPPED -eq 0 ]] && info "Tidak ada proxy per-instance yang aktif."
 
+# ── Batasi worker GenieACS per service agar RAM/CPU tidak bengkak ───────
+# Default GenieACS: 0 = max(2, jumlah CPU) worker PER service.
+# Untuk multi-instance kecil/menengah, 1 worker/service jauh lebih hemat.
+set_env_value() {
+    local file="$1" key="$2" value="$3"
+    if grep -qE "^${key}=" "$file" 2>/dev/null; then
+        sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+    else
+        printf '%s=%s\n' "$key" "$value" >> "$file"
+    fi
+}
+
+info "Mengunci worker GenieACS ke 1 per service untuk semua instance..."
+PATCHED=0
+while read -r LINE; do
+    [[ -z "$LINE" ]] && continue
+    USER="$(awk '{print $1}' <<< "$LINE")"
+    [[ -z "$USER" ]] && continue
+    ENV_FILE="$INSTANCES_DIR/$USER/.env"
+    [[ -f "$ENV_FILE" ]] || { warn "Skip $USER: .env tidak ditemukan"; continue; }
+
+    set_env_value "$ENV_FILE" "GENIEACS_CWMP_WORKER_PROCESSES" "1"
+    set_env_value "$ENV_FILE" "GENIEACS_NBI_WORKER_PROCESSES" "1"
+    set_env_value "$ENV_FILE" "GENIEACS_FS_WORKER_PROCESSES" "1"
+    set_env_value "$ENV_FILE" "GENIEACS_UI_WORKER_PROCESSES" "1"
+    success "$USER worker=1"
+    PATCHED=$((PATCHED + 1))
+done < "$REGISTRY"
+
+if [[ $PATCHED -gt 0 ]]; then
+    info "Restart core services agar worker limit aktif..."
+    while read -r LINE; do
+        [[ -z "$LINE" ]] && continue
+        USER="$(awk '{print $1}' <<< "$LINE")"
+        [[ -z "$USER" ]] && continue
+        for SVC in cwmp fs nbi ui; do
+            systemctl restart "genieacs-${USER}-${SVC}" 2>/dev/null || warn "Gagal restart genieacs-${USER}-${SVC}"
+        done
+    done < "$REGISTRY"
+fi
+
 # ── Install service systemd multi-proxy ──────────────────────
 info "Membuat service genieacs-multi-proxy..."
 cat > "$SERVICE_FILE" <<EOF
