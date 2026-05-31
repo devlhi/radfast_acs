@@ -45,6 +45,15 @@ const ADMIN_TOKEN  = process.env.RADFAST_ADMIN_TOKEN               || '';
 const JWT_SECRET   = process.env.GENIEACS_UI_JWT_SECRET            || '';
 const MAX_SIZE     = 2 * 1024 * 1024; // 2 MB hard limit
 
+// RadFast Admin (backend VPN) — sumber data status VPN ONT.
+// Dipanggil server-to-server pakai X-API-Key (provisioning key), bukan session.
+const RADFAST_ADMIN_URL = (process.env.RADFAST_ADMIN_URL || 'http://127.0.0.1:9000').replace(/\/+$/, '');
+const RADFAST_ADMIN_API_KEY = process.env.RADFAST_ADMIN_API_KEY || '';
+// Nama instance GenieACS ini (dari multi-proxy). Dipakai filter status VPN
+// agar tiap dashboard hanya melihat akun VPN miliknya. Diambil dari env proxy
+// (BUKAN dari browser) sehingga tidak bisa dimanipulasi tenant lain.
+const RADFAST_INSTANCE_NAME = (process.env.RADFAST_INSTANCE_NAME || '').trim();
+
 // Cookie isolation: prefix semua cookie JWT dengan _p<PORT>_
 // Supaya tiap instance punya cookie terpisah di browser (tidak saling overwrite)
 // Strategi: deteksi JWT dari VALUE (3 bagian base64url), bukan nama cookie
@@ -398,6 +407,62 @@ const SEC_HEADERS = {
 function sendSecure(res, status, ct, body) {
     res.writeHead(status, { 'Content-Type': ct, ...SEC_HEADERS });
     res.end(body);
+}
+
+// ════════════════════════════════════════════════════════════
+//  RADFAST ADMIN — fetch status VPN ONT (server-to-server)
+// ════════════════════════════════════════════════════════════
+// Ambil status VPN ONT dari RadFast Admin backend memakai X-API-Key.
+// Tidak meneruskan cookie/session browser (mencegah SSRF/credential leak).
+function fetchVpnStatus(cb) {
+    if (!RADFAST_ADMIN_API_KEY) {
+        cb(new Error('RADFAST_ADMIN_API_KEY belum di-set'), null);
+        return;
+    }
+    let target;
+    try {
+        target = new URL(RADFAST_ADMIN_URL + '/api/provision/vpn-status');
+        // Filter per-instance (dari env proxy, bukan input browser → tidak bisa dimanipulasi)
+        if (RADFAST_INSTANCE_NAME) target.searchParams.set('instance', RADFAST_INSTANCE_NAME);
+    } catch (e) {
+        cb(new Error('RADFAST_ADMIN_URL tidak valid'), null);
+        return;
+    }
+    // Hanya izinkan http/https; jangan ikuti skema lain.
+    if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+        cb(new Error('Protokol RADFAST_ADMIN_URL tidak didukung'), null);
+        return;
+    }
+    const lib = target.protocol === 'https:' ? require('https') : http;
+    const opts = {
+        hostname: target.hostname,
+        port: target.port || (target.protocol === 'https:' ? 443 : 80),
+        path: target.pathname + target.search,
+        method: 'GET',
+        headers: {
+            'X-API-Key': RADFAST_ADMIN_API_KEY,
+            'Accept': 'application/json',
+        },
+        timeout: 5000,
+    };
+    const upstream = lib.request(opts, (uRes) => {
+        let raw = '';
+        uRes.on('data', (c) => {
+            raw += c;
+            if (raw.length > 256 * 1024) upstream.destroy(); // batasi 256KB
+        });
+        uRes.on('end', () => {
+            if (uRes.statusCode !== 200) {
+                cb(new Error('RadFast Admin status ' + uRes.statusCode), null);
+                return;
+            }
+            try { cb(null, JSON.parse(raw || '{}')); }
+            catch (e) { cb(new Error('Response RadFast Admin bukan JSON'), null); }
+        });
+    });
+    upstream.on('timeout', () => { upstream.destroy(new Error('Timeout ke RadFast Admin')); });
+    upstream.on('error', (e) => { cb(e, null); });
+    upstream.end();
 }
 
 // ════════════════════════════════════════════════════════════
@@ -929,6 +994,7 @@ const NAV_INJECT = String.raw`<script>
   function closeModal(){
     if(_modal){ _modal.classList.remove('open'); }
     if(_apiModal){ _apiModal.classList.remove('open'); _apiModal.style.display='none'; }
+    if(_vpnModal){ _vpnModal.classList.remove('open'); _vpnModal.style.display='none'; }
   }
 
   function apiUrlFromPath(path){ return location.protocol+'//'+location.host+(path||''); }
@@ -1049,6 +1115,104 @@ const NAV_INJECT = String.raw`<script>
     if(bd._rfCheckInfo) bd._rfCheckInfo();
   }
 
+  /* ── Modal Status VPN ONT ── */
+  var _vpnModal=null;
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function buildVpnModal(){
+    if(_vpnModal && document.body.contains(_vpnModal)) return _vpnModal;
+    var bd=document.createElement('div'); bd.id='rf-vpn-bd';
+    bd.style.cssText='display:none;position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147483647;background:rgba(0,0,0,.5);align-items:center;justify-content:center;';
+    bd.addEventListener('click',function(e){ if(e.target===bd) closeModal(); });
+
+    var box=document.createElement('div'); box.id='rf-vpn-box';
+    box.style.cssText='background:#fff;border-radius:4px;width:720px;max-width:96vw;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 6px 32px rgba(0,0,0,.35);font-family:Arial,sans-serif;font-size:14px;overflow:hidden;';
+
+    var head=document.createElement('div');
+    head.style.cssText='background:#16a085;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;';
+    var title=document.createElement('h3'); title.textContent='Status VPN ONT'; title.style.cssText='margin:0;font-size:15px;color:#fff;';
+    var x=document.createElement('button'); x.innerHTML='&times;'; x.title='Tutup'; x.style.cssText='background:none;border:none;font-size:22px;cursor:pointer;color:#fff;line-height:1;padding:0 2px;';
+    x.addEventListener('click',closeModal); head.appendChild(title); head.appendChild(x);
+
+    var body=document.createElement('div'); body.style.cssText='padding:16px;overflow:auto;';
+    body.innerHTML='<div id="rf-vpn-msg" style="display:none;padding:8px 10px;border-radius:3px;margin-bottom:10px;font-size:13px"></div>'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'+
+        '<div style="font-size:13px;color:#444">Status tunnel + reachability ONT per akun VPN.</div>'+
+        '<button id="rf-vpn-refresh" class="rf-btn" style="background:#16a085;color:#fff;border:none;border-radius:3px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:bold">\u21BB Refresh</button>'+
+      '</div>'+
+      '<div id="rf-vpn-token-wrap" style="display:none;margin-bottom:10px">'+
+        '<label style="display:block;font-size:12px;font-weight:bold;color:#555;margin-bottom:4px">Token Admin (kalau session belum terbaca)</label>'+
+        '<input id="rf-vpn-token" type="password" autocomplete="new-password" placeholder="Isi token admin" style="width:100%;box-sizing:border-box;border:1px solid #ddd;border-radius:4px;padding:8px">'+
+      '</div>'+
+      '<div id="rf-vpn-body">Memuat...</div>';
+
+    box.appendChild(head); box.appendChild(body); bd.appendChild(box);
+    var msg=body.querySelector('#rf-vpn-msg');
+    var token=body.querySelector('#rf-vpn-token');
+    var tokenWrap=body.querySelector('#rf-vpn-token-wrap');
+    var listEl=body.querySelector('#rf-vpn-body');
+    var refresh=body.querySelector('#rf-vpn-refresh');
+
+    function badge(reachable,tunnel){
+      if(tunnel!=='up') return '<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:#eee;color:#777;font-size:11px;font-weight:bold">tunnel down</span>';
+      return reachable
+        ? '<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:#e6f5ea;color:#1f7a3d;font-size:11px;font-weight:bold">\u25CF online</span>'
+        : '<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:#fdeaea;color:#b13434;font-size:11px;font-weight:bold">\u25CF unreachable</span>';
+    }
+    function rttTxt(r){ return (r==null)?'\u2014':(r+' ms'); }
+    function rows(items,kind){
+      if(!items.length) return '<tr><td colspan="5" style="padding:10px;color:#999;text-align:center">Belum ada akun '+kind+'.</td></tr>';
+      return items.map(function(it){
+        var name=esc(it.username||it.name||'-');
+        var ip=esc(it.ont_ip||'-');
+        var subnet=esc(it.lan_subnet||'-');
+        return '<tr style="border-top:1px solid #eee">'+
+          '<td style="padding:7px 8px;font-weight:bold">'+name+'</td>'+
+          '<td style="padding:7px 8px;font-family:monospace;font-size:12px">'+ip+'</td>'+
+          '<td style="padding:7px 8px;font-family:monospace;font-size:12px">'+subnet+'</td>'+
+          '<td style="padding:7px 8px">'+badge(it.ont_reachable,it.tunnel)+'</td>'+
+          '<td style="padding:7px 8px;text-align:right">'+rttTxt(it.ont_rtt_ms)+'</td>'+
+        '</tr>';
+      }).join('');
+    }
+    function table(label,items,kind){
+      return '<div style="margin-bottom:14px">'+
+        '<div style="font-size:13px;font-weight:bold;color:#333;margin-bottom:4px">'+label+' <span style="color:#999;font-weight:normal">('+items.length+')</span></div>'+
+        '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
+          '<thead><tr style="background:#f5f7f9;color:#555;font-size:11px;text-align:left">'+
+            '<th style="padding:6px 8px">Akun</th><th style="padding:6px 8px">IP ONT</th><th style="padding:6px 8px">LAN Subnet</th><th style="padding:6px 8px">Status</th><th style="padding:6px 8px;text-align:right">RTT</th>'+
+          '</tr></thead><tbody>'+rows(items,kind)+'</tbody>'+
+        '</table></div>';
+    }
+    function render(d){
+      if(!d.ok){
+        if(d.error && /Unauthorized/i.test(d.error)) tokenWrap.style.display='block';
+        apiMsg(msg,'er',d.error||'Gagal ambil status VPN'); return;
+      }
+      msg.style.display='none';
+      var l2tp=d.l2tp||[], wg=d.wireguard||[];
+      if(!l2tp.length && !wg.length){ listEl.innerHTML='<div style="padding:14px;color:#999;text-align:center">Belum ada akun VPN terdaftar.</div>'; return; }
+      listEl.innerHTML=table('L2TP',l2tp,'L2TP')+table('WireGuard',wg,'WireGuard');
+    }
+    function load(){
+      listEl.innerHTML='<div style="padding:14px;color:#888;text-align:center">Memuat...</div>';
+      fetch('/__admin/api/vpn-status',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:(token&&token.value)||''})})
+        .then(function(r){return r.json();}).then(render)
+        .catch(function(){ listEl.innerHTML=''; apiMsg(msg,'er','Gagal koneksi ke server.'); });
+    }
+    refresh.addEventListener('click',function(e){ e.preventDefault(); load(); });
+    bd._rfLoad=load;
+    _vpnModal=bd;
+    return bd;
+  }
+
+  function openVpnModal(){
+    var bd=buildVpnModal();
+    if(!document.body.contains(bd)) document.body.appendChild(bd);
+    bd.classList.add('open');
+    bd.style.display='flex';
+    if(bd._rfLoad) bd._rfLoad();
+  }
+
   /* ESC key */
   document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeModal(); });
 
@@ -1081,12 +1245,14 @@ const NAV_INJECT = String.raw`<script>
 
   function syncBtn(){
     // Deteksi halaman login GenieACS, abaikan field password milik modal kita
-    var onLogin = !!document.querySelector('input[type="password"]:not(#rf-api-token):not(#rf-finput)');
+    var onLogin = !!document.querySelector('input[type="password"]:not(#rf-api-token):not(#rf-finput):not(#rf-vpn-token)');
     var btn = document.getElementById('rf-nav-btn');
     var apiBtn = document.getElementById('rf-nav-api');
+    var vpnBtn = document.getElementById('rf-nav-vpn');
     if(onLogin){
       if(btn) btn.style.display='none';
       if(apiBtn) apiBtn.style.display='none';
+      if(vpnBtn) vpnBtn.style.display='none';
       return;
     }
     if(!btn){
@@ -1121,12 +1287,31 @@ const NAV_INJECT = String.raw`<script>
       });
       document.documentElement.appendChild(apiBtn);
     }
-    // Posisikan: Logo tepat di kanan Admin, API di kanan tombol Logo
+    if(!vpnBtn){
+      vpnBtn = document.createElement('span');
+      vpnBtn.id = 'rf-nav-vpn';
+      vpnBtn.setAttribute('style',
+        'position:fixed;z-index:2147483647;display:none;' +
+        'background:#16a085;color:#fff;border-radius:3px;padding:0 8px;' +
+        'font-weight:bold;font-size:11px;font-family:Arial,sans-serif;' +
+        'user-select:none;white-space:nowrap;cursor:pointer;' +
+        'letter-spacing:0.3px;box-shadow:0 1px 3px rgba(0,0,0,.25);'
+      );
+      vpnBtn.innerHTML='\uD83D\uDCF6 Status VPN';
+      vpnBtn.addEventListener('click', function(e){
+        e.preventDefault(); e.stopPropagation(); openVpnModal();
+      });
+      document.documentElement.appendChild(vpnBtn);
+    }
+    // Posisikan: Logo tepat di kanan Admin, API di kanan Logo, VPN di kanan API
     btn._rfOffset = 0;
     alignToNav(btn);
     var logoW = btn.getBoundingClientRect().width || 78;
     apiBtn._rfOffset = logoW + 6;
     alignToNav(apiBtn);
+    var apiW = apiBtn.getBoundingClientRect().width || 70;
+    vpnBtn._rfOffset = logoW + 6 + apiW + 6;
+    alignToNav(vpnBtn);
   }
 
   /* ── Startup: MutationObserver + resize listener ── */
@@ -1630,6 +1815,43 @@ const server = http.createServer((req, res) => {
                 }
 
                 sendSecure(res, 400, 'application/json', JSON.stringify({ ok: false, error: 'Action tidak dikenal' }));
+            } catch(e) {
+                sendSecure(res, 400, 'application/json', JSON.stringify({ ok: false, error: 'Request tidak valid' }));
+            }
+        });
+        return;
+    }
+
+    // ── Admin API: status VPN ONT (ambil dari RadFast Admin S2S) ─
+    if (url === '/__admin/api/vpn-status' && req.method === 'POST') {
+        let raw = '';
+        req.on('data', c => { raw += c; if (raw.length > 4096) req.destroy(); });
+        req.on('end', () => {
+            try {
+                const data = JSON.parse(raw || '{}');
+                const token = String(data.token || '').trim();
+                const authedBySession = isGenieSession(req);
+                const authedByToken = ADMIN_TOKEN && token === ADMIN_TOKEN;
+                if (!authedBySession && !authedByToken) {
+                    sendSecure(res, 401, 'application/json', JSON.stringify({ ok: false, error: 'Unauthorized (session/token)' }));
+                    return;
+                }
+                if (!RADFAST_ADMIN_API_KEY) {
+                    sendSecure(res, 503, 'application/json', JSON.stringify({ ok: false, error: 'Status VPN belum dikonfigurasi (RADFAST_ADMIN_API_KEY kosong).' }));
+                    return;
+                }
+                fetchVpnStatus((err, status) => {
+                    if (err) {
+                        sendSecure(res, 502, 'application/json', JSON.stringify({ ok: false, error: 'Gagal ambil status VPN dari RadFast Admin.' }));
+                        return;
+                    }
+                    sendSecure(res, 200, 'application/json', JSON.stringify({
+                        ok: true,
+                        l2tp: Array.isArray(status.l2tp) ? status.l2tp : [],
+                        wireguard: Array.isArray(status.wireguard) ? status.wireguard : [],
+                        ts: status.ts || Date.now()
+                    }));
+                });
             } catch(e) {
                 sendSecure(res, 400, 'application/json', JSON.stringify({ ok: false, error: 'Request tidak valid' }));
             }
