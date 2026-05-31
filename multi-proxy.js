@@ -78,6 +78,11 @@ function loadInstances() {
       RADFAST_UI_INTERNAL       : envConf.RADFAST_UI_INTERNAL,
       RADFAST_LOGO_FILE         : envConf.RADFAST_LOGO_FILE         || logoFile,
       RADFAST_ADMIN_TOKEN       : envConf.RADFAST_ADMIN_TOKEN       || '',
+      // RadFast Admin (backend VPN) — sumber data status VPN ONT (server-to-server)
+      RADFAST_ADMIN_URL         : envConf.RADFAST_ADMIN_URL         || process.env.RADFAST_ADMIN_URL     || '',
+      RADFAST_ADMIN_API_KEY     : envConf.RADFAST_ADMIN_API_KEY     || process.env.RADFAST_ADMIN_API_KEY || '',
+      // Nama instance ini → filter status VPN agar tiap dashboard lihat miliknya saja
+      RADFAST_INSTANCE_NAME     : envConf.RADFAST_INSTANCE_NAME     || r.name || '',
       GENIEACS_UI_JWT_SECRET    : envConf.GENIEACS_UI_JWT_SECRET    || '',
       GENIEACS_MONGODB_CONNECTION_URL: envConf.GENIEACS_MONGODB_CONNECTION_URL || '',
       // NBI gate config — wajib di-pass agar proxy tahu port NBI & secret path
