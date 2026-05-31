@@ -45,8 +45,8 @@ const ADMIN_TOKEN  = process.env.RADFAST_ADMIN_TOKEN               || '';
 const JWT_SECRET   = process.env.GENIEACS_UI_JWT_SECRET            || '';
 const MAX_SIZE     = 2 * 1024 * 1024; // 2 MB hard limit
 
-// RadFast Admin (backend VPN) — sumber data status VPN ONT.
-// Dipanggil server-to-server pakai X-API-Key (provisioning key), bukan session.
+// Sumber data status VPN (backend internal) — dipanggil server-to-server
+// pakai X-API-Key (provisioning key), bukan session browser.
 const RADFAST_ADMIN_URL = (process.env.RADFAST_ADMIN_URL || 'http://127.0.0.1:9000').replace(/\/+$/, '');
 const RADFAST_ADMIN_API_KEY = process.env.RADFAST_ADMIN_API_KEY || '';
 // Nama instance GenieACS ini (dari multi-proxy). Dipakai filter status VPN
@@ -410,13 +410,13 @@ function sendSecure(res, status, ct, body) {
 }
 
 // ════════════════════════════════════════════════════════════
-//  RADFAST ADMIN — fetch status VPN ONT (server-to-server)
+//  FETCH STATUS VPN (server-to-server)
 // ════════════════════════════════════════════════════════════
-// Ambil status VPN ONT dari RadFast Admin backend memakai X-API-Key.
+// Ambil status akun VPN dari backend memakai X-API-Key.
 // Tidak meneruskan cookie/session browser (mencegah SSRF/credential leak).
 function fetchVpnStatus(cb) {
     if (!RADFAST_ADMIN_API_KEY) {
-        cb(new Error('RADFAST_ADMIN_API_KEY belum di-set'), null);
+        cb(new Error('Konfigurasi VPN belum lengkap di server'), null);
         return;
     }
     let target;
@@ -425,12 +425,12 @@ function fetchVpnStatus(cb) {
         // Filter per-instance (dari env proxy, bukan input browser → tidak bisa dimanipulasi)
         if (RADFAST_INSTANCE_NAME) target.searchParams.set('instance', RADFAST_INSTANCE_NAME);
     } catch (e) {
-        cb(new Error('RADFAST_ADMIN_URL tidak valid'), null);
+        cb(new Error('Konfigurasi VPN tidak valid di server'), null);
         return;
     }
     // Hanya izinkan http/https; jangan ikuti skema lain.
     if (target.protocol !== 'http:' && target.protocol !== 'https:') {
-        cb(new Error('Protokol RADFAST_ADMIN_URL tidak didukung'), null);
+        cb(new Error('Konfigurasi VPN tidak didukung di server'), null);
         return;
     }
     const lib = target.protocol === 'https:' ? require('https') : http;
@@ -453,15 +453,73 @@ function fetchVpnStatus(cb) {
         });
         uRes.on('end', () => {
             if (uRes.statusCode !== 200) {
-                cb(new Error('RadFast Admin status ' + uRes.statusCode), null);
+                cb(new Error('Status VPN server: ' + uRes.statusCode), null);
                 return;
             }
             try { cb(null, JSON.parse(raw || '{}')); }
-            catch (e) { cb(new Error('Response RadFast Admin bukan JSON'), null); }
+            catch (e) { cb(new Error('Respons status VPN tidak valid'), null); }
         });
     });
-    upstream.on('timeout', () => { upstream.destroy(new Error('Timeout ke RadFast Admin')); });
+    upstream.on('timeout', () => { upstream.destroy(new Error('Timeout koneksi ke server VPN')); });
     upstream.on('error', (e) => { cb(e, null); });
+    upstream.end();
+}
+
+// Update static route akun VPN existing via backend provisioning API.
+// instance dipaksa dari env proxy (RADFAST_INSTANCE_NAME) agar tenant tidak
+// bisa mengubah akun instance lain. payload: hasil parse body admin.
+// Mengirim X-API-Key (provisioning), tidak meneruskan cookie/session browser.
+function updateVpnRoute(payload, cb) {
+    if (!RADFAST_ADMIN_API_KEY) {
+        cb(new Error('Konfigurasi VPN belum lengkap di server'), null);
+        return;
+    }
+    var bodyObj = {
+        type: payload.type === 'wireguard' ? 'wireguard' : 'l2tp',
+        name: payload.name,
+        instance: RADFAST_INSTANCE_NAME || undefined,
+        lan_subnet: payload.lan_subnet || '',
+        ont_ip: payload.ont_ip || '',
+    };
+    var bodyStr = JSON.stringify(bodyObj);
+
+    var target;
+    try {
+        target = new URL(RADFAST_ADMIN_URL + '/api/provision/vpn/route');
+    } catch (e) {
+        cb(new Error('Konfigurasi VPN tidak valid di server'), null);
+        return;
+    }
+    if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+        cb(new Error('Konfigurasi VPN tidak didukung di server'), null);
+        return;
+    }
+    var lib = target.protocol === 'https:' ? require('https') : http;
+    var opts = {
+        hostname: target.hostname,
+        port: target.port || (target.protocol === 'https:' ? 443 : 80),
+        path: target.pathname,
+        method: 'POST',
+        headers: {
+            'X-API-Key': RADFAST_ADMIN_API_KEY,
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(bodyStr),
+            'Accept': 'application/json',
+        },
+        timeout: 8000,
+    };
+    var upstream = lib.request(opts, function (uRes) {
+        var raw = '';
+        uRes.on('data', function (c) { raw += c; if (raw.length > 256 * 1024) upstream.destroy(); });
+        uRes.on('end', function () {
+            var parsed = null;
+            try { parsed = JSON.parse(raw || '{}'); } catch (e) { parsed = null; }
+            cb(null, { statusCode: uRes.statusCode, body: parsed });
+        });
+    });
+    upstream.on('timeout', function () { upstream.destroy(new Error('Timeout koneksi ke server VPN')); });
+    upstream.on('error', function (e) { cb(e, null); });
+    upstream.write(bodyStr);
     upstream.end();
 }
 
@@ -1115,7 +1173,7 @@ const NAV_INJECT = String.raw`<script>
     if(bd._rfCheckInfo) bd._rfCheckInfo();
   }
 
-  /* ── Modal Status VPN ONT ── */
+  /* ── Modal Status VPN ── */
   var _vpnModal=null;
   function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
   function buildVpnModal(){
@@ -1129,16 +1187,16 @@ const NAV_INJECT = String.raw`<script>
 
     var head=document.createElement('div');
     head.style.cssText='background:#16a085;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;';
-    var title=document.createElement('h3'); title.textContent='Status VPN ONT'; title.style.cssText='margin:0;font-size:15px;color:#fff;';
+    var title=document.createElement('h3'); title.textContent='Status VPN'; title.style.cssText='margin:0;font-size:15px;color:#fff;';
     var x=document.createElement('button'); x.innerHTML='&times;'; x.title='Tutup'; x.style.cssText='background:none;border:none;font-size:22px;cursor:pointer;color:#fff;line-height:1;padding:0 2px;';
     x.addEventListener('click',closeModal); head.appendChild(title); head.appendChild(x);
 
     var body=document.createElement('div'); body.style.cssText='padding:16px;overflow:auto;';
     body.innerHTML='<div id="rf-vpn-msg" style="display:none;padding:8px 10px;border-radius:3px;margin-bottom:10px;font-size:13px"></div>'+
       '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'+
-        '<div style="font-size:13px;color:#444">Status tunnel + reachability ONT per akun VPN.</div>'+
+        '<div style="font-size:13px;color:#444">Status tunnel dan koneksi per akun VPN instance ini. Aksi yang tersedia: atur static route.</div>'+
         '<button id="rf-vpn-refresh" class="rf-btn" style="background:#16a085;color:#fff;border:none;border-radius:3px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:bold">\u21BB Refresh</button>'+
-      '</div>'+
+      '</div>'+ 
       '<div id="rf-vpn-token-wrap" style="display:none;margin-bottom:10px">'+
         '<label style="display:block;font-size:12px;font-weight:bold;color:#555;margin-bottom:4px">Token Admin (kalau session belum terbaca)</label>'+
         '<input id="rf-vpn-token" type="password" autocomplete="new-password" placeholder="Isi token admin" style="width:100%;box-sizing:border-box;border:1px solid #ddd;border-radius:4px;padding:8px">'+
@@ -1160,17 +1218,23 @@ const NAV_INJECT = String.raw`<script>
     }
     function rttTxt(r){ return (r==null)?'\u2014':(r+' ms'); }
     function rows(items,kind){
-      if(!items.length) return '<tr><td colspan="5" style="padding:10px;color:#999;text-align:center">Belum ada akun '+kind+'.</td></tr>';
+      if(!items.length) return '<tr><td colspan="6" style="padding:10px;color:#999;text-align:center">Belum ada akun '+kind+'.</td></tr>';
       return items.map(function(it){
         var name=esc(it.username||it.name||'-');
         var ip=esc(it.ont_ip||'-');
         var subnet=esc(it.lan_subnet||'-');
+        var rawName=(it.username||it.name||'');
+        var k=(kind==='WireGuard')?'wireguard':'l2tp';
         return '<tr style="border-top:1px solid #eee">'+
           '<td style="padding:7px 8px;font-weight:bold">'+name+'</td>'+
           '<td style="padding:7px 8px;font-family:monospace;font-size:12px">'+ip+'</td>'+
           '<td style="padding:7px 8px;font-family:monospace;font-size:12px">'+subnet+'</td>'+
           '<td style="padding:7px 8px">'+badge(it.ont_reachable,it.tunnel)+'</td>'+
           '<td style="padding:7px 8px;text-align:right">'+rttTxt(it.ont_rtt_ms)+'</td>'+
+          '<td style="padding:7px 8px;text-align:right">'+
+            '<button class="rf-route-btn" data-kind="'+k+'" data-name="'+esc(rawName)+'" data-subnet="'+esc(it.lan_subnet||'')+'" data-ip="'+esc(it.ont_ip||'')+'" '+
+              'style="background:#2980b9;color:#fff;border:none;border-radius:3px;padding:5px 10px;cursor:pointer;font-size:12px;font-weight:bold">Atur Route</button>'+
+          '</td>'+
         '</tr>';
       }).join('');
     }
@@ -1179,9 +1243,32 @@ const NAV_INJECT = String.raw`<script>
         '<div style="font-size:13px;font-weight:bold;color:#333;margin-bottom:4px">'+label+' <span style="color:#999;font-weight:normal">('+items.length+')</span></div>'+
         '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
           '<thead><tr style="background:#f5f7f9;color:#555;font-size:11px;text-align:left">'+
-            '<th style="padding:6px 8px">Akun</th><th style="padding:6px 8px">IP ONT</th><th style="padding:6px 8px">LAN Subnet</th><th style="padding:6px 8px">Status</th><th style="padding:6px 8px;text-align:right">RTT</th>'+
-          '</tr></thead><tbody>'+rows(items,kind)+'</tbody>'+
+            '<th style="padding:6px 8px">Akun</th><th style="padding:6px 8px">IP Klien</th><th style="padding:6px 8px">Static Route</th><th style="padding:6px 8px">Status</th><th style="padding:6px 8px;text-align:right">RTT</th><th style="padding:6px 8px;text-align:right">Aksi</th>'+
+          '</tr></thead><tbody>'+rows(items,kind)+'</tbody>'+ 
         '</table></div>';
+    }
+    // ── Edit static route untuk satu akun (inline prompt sederhana) ──
+    function openRoute(kind,name,curSubnet,curIp){
+      var subnet=prompt('Static route / LAN subnet untuk "'+name+'"\n(kosongkan untuk hapus route)\nContoh: 192.168.10.0/24', curSubnet||'');
+      if(subnet===null) return; // batal
+      subnet=(subnet||'').trim();
+      var ip=prompt('IP klien (opsional) untuk "'+name+'"\nContoh: 192.168.10.1', curIp||'');
+      if(ip===null) return; // batal
+      ip=(ip||'').trim();
+      if(subnet && !/^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test(subnet)){ apiMsg(msg,'er','Format static route salah. Pakai CIDR, mis. 192.168.10.0/24.'); return; }
+      if(ip && !/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)){ apiMsg(msg,'er','Format IP klien salah, mis. 192.168.10.1.'); return; }
+      var payload={ type:kind, name:name, lan_subnet:subnet, ont_ip:ip, token:(token&&token.value)||'' };
+      apiMsg(msg,'ok','Menyimpan static route...');
+      fetch('/__admin/api/vpn-route',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+        .then(function(r){return r.json();})
+        .then(function(d){
+          if(!d.ok){
+            if(d.error && /Unauthorized/i.test(d.error)) tokenWrap.style.display='block';
+            apiMsg(msg,'er',d.error||'Gagal menyimpan static route'); return;
+          }
+          apiMsg(msg,'ok','Static route diperbarui.'); load();
+        })
+        .catch(function(){ apiMsg(msg,'er','Gagal koneksi ke server.'); });
     }
     function render(d){
       if(!d.ok){
@@ -1190,8 +1277,16 @@ const NAV_INJECT = String.raw`<script>
       }
       msg.style.display='none';
       var l2tp=d.l2tp||[], wg=d.wireguard||[];
-      if(!l2tp.length && !wg.length){ listEl.innerHTML='<div style="padding:14px;color:#999;text-align:center">Belum ada akun VPN terdaftar.</div>'; return; }
+      if(!l2tp.length && !wg.length){ listEl.innerHTML='<div style="padding:14px;color:#999;text-align:center">Belum ada akun VPN terdaftar untuk instance ini.</div>'; return; }
       listEl.innerHTML=table('L2TP',l2tp,'L2TP')+table('WireGuard',wg,'WireGuard');
+      var btns=listEl.querySelectorAll('.rf-route-btn');
+      for(var i=0;i<btns.length;i++){
+        btns[i].addEventListener('click',function(e){
+          e.preventDefault();
+          var t=e.currentTarget;
+          openRoute(t.getAttribute('data-kind'),t.getAttribute('data-name'),t.getAttribute('data-subnet'),t.getAttribute('data-ip'));
+        });
+      }
     }
     function load(){
       listEl.innerHTML='<div style="padding:14px;color:#888;text-align:center">Memuat...</div>';
@@ -1200,6 +1295,7 @@ const NAV_INJECT = String.raw`<script>
         .catch(function(){ listEl.innerHTML=''; apiMsg(msg,'er','Gagal koneksi ke server.'); });
     }
     refresh.addEventListener('click',function(e){ e.preventDefault(); load(); });
+
     bd._rfLoad=load;
     _vpnModal=bd;
     return bd;
@@ -1822,7 +1918,7 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    // ── Admin API: status VPN ONT (ambil dari RadFast Admin S2S) ─
+    // ── Admin API: status VPN (server-to-server) ─
     if (url === '/__admin/api/vpn-status' && req.method === 'POST') {
         let raw = '';
         req.on('data', c => { raw += c; if (raw.length > 4096) req.destroy(); });
@@ -1833,18 +1929,24 @@ const server = http.createServer((req, res) => {
                 const authedBySession = isGenieSession(req);
                 const authedByToken = ADMIN_TOKEN && token === ADMIN_TOKEN;
                 if (!authedBySession && !authedByToken) {
+                    auditLog('VPN-AUTH', ip, 'Gagal akses status VPN (session/token tidak valid)');
                     sendSecure(res, 401, 'application/json', JSON.stringify({ ok: false, error: 'Unauthorized (session/token)' }));
                     return;
                 }
                 if (!RADFAST_ADMIN_API_KEY) {
-                    sendSecure(res, 503, 'application/json', JSON.stringify({ ok: false, error: 'Status VPN belum dikonfigurasi (RADFAST_ADMIN_API_KEY kosong).' }));
+                    auditLog('VPN-CONF', ip, 'Gagal akses status VPN (konfigurasi server belum lengkap)');
+                    sendSecure(res, 503, 'application/json', JSON.stringify({ ok: false, error: 'Status VPN belum dikonfigurasi di server.' }));
                     return;
                 }
                 fetchVpnStatus((err, status) => {
                     if (err) {
-                        sendSecure(res, 502, 'application/json', JSON.stringify({ ok: false, error: 'Gagal ambil status VPN dari RadFast Admin.' }));
+                        auditLog('VPN-STAT', ip, `Gagal ambil status VPN instance=${RADFAST_INSTANCE_NAME || '-'} (${err.message})`);
+                        sendSecure(res, 502, 'application/json', JSON.stringify({ ok: false, error: 'Gagal mengambil status VPN dari server.' }));
                         return;
                     }
+                    const l2tpCount = Array.isArray(status.l2tp) ? status.l2tp.length : 0;
+                    const wgCount = Array.isArray(status.wireguard) ? status.wireguard.length : 0;
+                    auditLog('VPN-STAT', ip, `Status VPN dibuka instance=${RADFAST_INSTANCE_NAME || '-'} l2tp=${l2tpCount} wg=${wgCount}`);
                     sendSecure(res, 200, 'application/json', JSON.stringify({
                         ok: true,
                         l2tp: Array.isArray(status.l2tp) ? status.l2tp : [],
@@ -1853,6 +1955,88 @@ const server = http.createServer((req, res) => {
                     }));
                 });
             } catch(e) {
+                auditLog('VPN-REQ', ip, 'Request status VPN tidak valid');
+                sendSecure(res, 400, 'application/json', JSON.stringify({ ok: false, error: 'Request tidak valid' }));
+            }
+        });
+        return;
+    }
+
+    // ── Admin API: update static route VPN existing (server-to-server) ─
+    if (url === '/__admin/api/vpn-route' && req.method === 'POST') {
+        let raw = '';
+        req.on('data', c => { raw += c; if (raw.length > 4096) req.destroy(); });
+        req.on('end', () => {
+            try {
+                const data = JSON.parse(raw || '{}');
+                const token = String(data.token || '').trim();
+                const authedBySession = isGenieSession(req);
+                const authedByToken = ADMIN_TOKEN && token === ADMIN_TOKEN;
+                if (!authedBySession && !authedByToken) {
+                    auditLog('VPN-AUTH', ip, 'Gagal update route VPN (session/token tidak valid)');
+                    sendSecure(res, 401, 'application/json', JSON.stringify({ ok: false, error: 'Unauthorized (session/token)' }));
+                    return;
+                }
+                if (!RADFAST_ADMIN_API_KEY) {
+                    auditLog('VPN-CONF', ip, 'Gagal update route VPN (konfigurasi server belum lengkap)');
+                    sendSecure(res, 503, 'application/json', JSON.stringify({ ok: false, error: 'Pengaturan static route belum dikonfigurasi di server.' }));
+                    return;
+                }
+                const type = String(data.type || 'l2tp').trim().toLowerCase() === 'wireguard' ? 'wireguard' : 'l2tp';
+                const name = String(data.name || '').trim();
+                const lan_subnet = String(data.lan_subnet || '').trim();
+                const ont_ip = String(data.ont_ip || '').trim();
+
+                if (type === 'wireguard') {
+                    if (!/^[a-z][a-z0-9-]{0,40}$/.test(name)) {
+                        auditLog('VPN-ROUTE', ip, `Validasi gagal route VPN type=${type} name=${name || '-'} (nama peer tidak valid)`);
+                        sendSecure(res, 400, 'application/json', JSON.stringify({ ok: false, error: 'Nama peer tidak valid.' }));
+                        return;
+                    }
+                } else {
+                    if (!/^[a-zA-Z0-9_.-]{1,64}$/.test(name)) {
+                        auditLog('VPN-ROUTE', ip, `Validasi gagal route VPN type=${type} name=${name || '-'} (username tidak valid)`);
+                        sendSecure(res, 400, 'application/json', JSON.stringify({ ok: false, error: 'Username tidak valid.' }));
+                        return;
+                    }
+                }
+                if (lan_subnet && lan_subnet.length > 32) {
+                    auditLog('VPN-ROUTE', ip, `Validasi gagal route VPN type=${type} name=${name || '-'} (static route terlalu panjang)`);
+                    sendSecure(res, 400, 'application/json', JSON.stringify({ ok: false, error: 'Static route terlalu panjang.' }));
+                    return;
+                }
+                if (ont_ip && ont_ip.length > 18) {
+                    auditLog('VPN-ROUTE', ip, `Validasi gagal route VPN type=${type} name=${name || '-'} (IP klien tidak valid)`);
+                    sendSecure(res, 400, 'application/json', JSON.stringify({ ok: false, error: 'IP klien tidak valid.' }));
+                    return;
+                }
+
+                const payload = {
+                    type: type,
+                    name: name,
+                    lan_subnet: lan_subnet,
+                    ont_ip: ont_ip,
+                };
+                updateVpnRoute(payload, (err, result) => {
+                    if (err || !result) {
+                        auditLog('VPN-ROUTE', ip, `Gagal update route VPN instance=${RADFAST_INSTANCE_NAME || '-'} type=${type} name=${name} (${err ? err.message : 'no result'})`);
+                        sendSecure(res, 502, 'application/json', JSON.stringify({ ok: false, error: 'Gagal menyimpan static route di server.' }));
+                        return;
+                    }
+                    if (result.statusCode >= 200 && result.statusCode < 300) {
+                        auditLog('VPN-ROUTE', ip, `Route VPN diperbarui instance=${RADFAST_INSTANCE_NAME || '-'} type=${type} name=${name} subnet=${lan_subnet || '-'} ip=${ont_ip || '-'}`);
+                        sendSecure(res, 200, 'application/json', JSON.stringify({ ok: true, result: result.body || {} }));
+                        return;
+                    }
+                    let emsg = 'Gagal menyimpan static route.';
+                    if (result.body && typeof result.body === 'object') {
+                        emsg = result.body.message || (Array.isArray(result.body.errors) && result.body.errors.length ? 'Input tidak valid.' : emsg);
+                    }
+                    auditLog('VPN-ROUTE', ip, `Update route VPN ditolak instance=${RADFAST_INSTANCE_NAME || '-'} type=${type} name=${name} status=${result.statusCode} msg=${emsg}`);
+                    sendSecure(res, (result.statusCode === 404 ? 404 : 400), 'application/json', JSON.stringify({ ok: false, error: emsg }));
+                });
+            } catch(e) {
+                auditLog('VPN-REQ', ip, 'Request update route VPN tidak valid');
                 sendSecure(res, 400, 'application/json', JSON.stringify({ ok: false, error: 'Request tidak valid' }));
             }
         });
