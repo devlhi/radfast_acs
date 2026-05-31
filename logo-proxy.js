@@ -23,7 +23,15 @@ const crypto = require('crypto');
 
 const PUBLIC_PORT  = parseInt(process.env.RADFAST_PROXY_PORT       || 3001);
 const GENIE_PORT   = parseInt(process.env.RADFAST_UI_INTERNAL      || 13001);
-const NBI_PORT     = parseInt(process.env.GENIEACS_NBI_PORT        || 7558);
+// Port NBI HARUS di-set eksplisit lewat .env (per instance). JANGAN fallback ke
+// angka tetap: di server multi-instance, port tetap itu bisa nyasar ke service
+// CWMP/instance lain → request /devices dibalas "405 Method Not Allowed" (CWMP
+// hanya terima POST). 0 = belum dikonfigurasi → NBI gate dimatikan dgn error jelas.
+const NBI_PORT     = parseInt((process.env.GENIEACS_NBI_PORT || '').trim() || '0', 10) || 0;
+if (!NBI_PORT) {
+    console.warn('[proxy] PERINGATAN: GENIEACS_NBI_PORT tidak diset — NBI gate (REST API) dinonaktifkan. '
+        + 'Set GENIEACS_NBI_PORT di .env instance lalu restart proxy.');
+}
 // Secret path untuk akses NBI (REST API GenieACS) lewat port UI publik ini.
 // Di-set per instance via .env (RADFAST_NBI_GATE_PATH).
 // JIKA KOSONG — otomatis di-generate saat startup (tidak pernah nonaktif).
@@ -1799,6 +1807,14 @@ function proxyRequest(req, res) {
 //  Contoh: http://IP:3001/<secret>/devices  →  127.0.0.1:7558/devices
 // ════════════════════════════════════════════════════════════
 function proxyNbiRequest(req, res, upstreamPath) {
+    // NBI_PORT wajib terkonfigurasi. Tanpa ini, request bisa nyasar ke port lain
+    // (mis. CWMP yang hanya terima POST → balas 405). Lebih baik error jelas.
+    if (!NBI_PORT) {
+        auditLog('NBI-MISCONFIG', getIP(req), `${req.method} ${req.url} — GENIEACS_NBI_PORT belum diset`);
+        sendSecure(res, 503, 'application/json',
+            '{"error":"NBI belum dikonfigurasi (GENIEACS_NBI_PORT kosong). Set di .env lalu restart proxy."}');
+        return;
+    }
     const headers = { ...req.headers, host: `127.0.0.1:${NBI_PORT}` };
     delete headers['accept-encoding'];
     // Cookie UI tidak relevan untuk NBI — buang biar bersih
