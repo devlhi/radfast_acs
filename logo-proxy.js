@@ -1367,13 +1367,23 @@ const NAV_INJECT = String.raw`<script>
     b.style.opacity   = '1';
   }
 
+  // Drawer staging/queue GenieACS terbuka? (saat edit parameter, queue task, dll)
+  // Drawer collapsed = height ~0; saat terbuka height > 0 dan menutupi area tombol.
+  function drawerOpen(){
+    var dw = document.querySelector('#header .drawer-wrapper .drawer');
+    if(!dw) return false;
+    return dw.getBoundingClientRect().height > 5;
+  }
+
   function syncBtn(){
     // Deteksi halaman login GenieACS, abaikan field password milik modal kita
     var onLogin = !!document.querySelector('input[type="password"]:not(#rf-api-token):not(#rf-finput):not(#rf-vpn-token)');
     var btn = document.getElementById('rf-nav-btn');
     var apiBtn = document.getElementById('rf-nav-api');
     var vpnBtn = document.getElementById('rf-nav-vpn');
-    if(onLogin){
+    // Sembunyikan tombol saat di login ATAU saat drawer staging/queue GenieACS terbuka,
+    // supaya tidak menutupi tombol Commit/Clear/Queue/Cancel milik GenieACS.
+    if(onLogin || drawerOpen()){
       if(btn) btn.style.display='none';
       if(apiBtn) apiBtn.style.display='none';
       if(vpnBtn) vpnBtn.style.display='none';
