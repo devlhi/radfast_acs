@@ -69,22 +69,24 @@ reserve_port 3001; UI_PORT="$RESERVED_PORT"
 reserve_port 7548; CWMP_PORT="$RESERVED_PORT"
 reserve_port 7558; NBI_PORT="$RESERVED_PORT"
 reserve_port 7568; FS_PORT="$RESERVED_PORT"
+# Port publik khusus NBI/REST API (terpisah dari dashboard). Range 3500+.
+reserve_port 3500; NBI_PROXY_PORT="$RESERVED_PORT"
 
-# ── Sanity check: keempat port WAJIB unik ────────────────────
+# ── Sanity check: kelima port WAJIB unik ─────────────────────
 # Guard defense-in-depth: kalau ada bug/edge-case yang bikin port tabrakan,
 # stop di sini daripada menulis .env rusak (NBI nyasar ke CWMP → 405).
-_dup_check=$(printf '%s\n' "$UI_PORT" "$CWMP_PORT" "$NBI_PORT" "$FS_PORT" | sort | uniq -d)
+_dup_check=$(printf '%s\n' "$UI_PORT" "$CWMP_PORT" "$NBI_PORT" "$FS_PORT" "$NBI_PROXY_PORT" | sort | uniq -d)
 if [[ -n "$_dup_check" ]]; then
-    error "Alokasi port tabrakan (UI=$UI_PORT CWMP=$CWMP_PORT NBI=$NBI_PORT FS=$FS_PORT). Port duplikat: $(echo "$_dup_check" | tr '\n' ' ')"
+    error "Alokasi port tabrakan (UI=$UI_PORT CWMP=$CWMP_PORT NBI=$NBI_PORT FS=$FS_PORT NBI_PROXY=$NBI_PROXY_PORT). Port duplikat: $(echo "$_dup_check" | tr '\n' ' ')"
 fi
-# UI_INTERNAL juga harus tidak bentrok dengan port lain (jarang, tapi jaga-jaga)
-for _p in "$UI_PORT" "$CWMP_PORT" "$NBI_PORT" "$FS_PORT"; do
+# Validasi rentang port
+for _p in "$UI_PORT" "$CWMP_PORT" "$NBI_PORT" "$FS_PORT" "$NBI_PROXY_PORT"; do
     [[ "$_p" -ge 1024 && "$_p" -le 65535 ]] || error "Port di luar rentang valid: $_p"
 done
 
 # Port internal GenieACS UI (dipakai logo-proxy, user tidak akses langsung)
 # Pakai rentang 13000+ supaya tidak bentrok
-UI_INTERNAL=$(next_free_from $((UI_PORT + 10000)))
+reserve_port $((UI_PORT + 10000)); UI_INTERNAL="$RESERVED_PORT"
 
 # ── Secret & info ────────────────────────────────────────────
 JWT_SECRET=$(openssl rand -hex 32 2>/dev/null || \
@@ -168,6 +170,9 @@ RADFAST_UI_INTERNAL=${UI_INTERNAL}
 RADFAST_NBI_GATE_PATH=${NBI_GATE_PATH}
 # Maksimum ganti NBI secret via dashboard per restart (0 = unlimited)
 RADFAST_NBI_GATE_MAX_CHANGES=3
+# Port publik KHUSUS NBI/REST API (terpisah dari dashboard). TETAP wajib secret
+# path; NBI asli tetap di 127.0.0.1. URL billing: http://${SERVER_IP}:${NBI_PROXY_PORT}${NBI_GATE_PATH}/devices
+RADFAST_NBI_PROXY_PORT=${NBI_PROXY_PORT}
 RADFAST_LOGO_FILE=${LOGO_BASE}
 RADFAST_ADMIN_TOKEN=${ADMIN_TOKEN}
 EOF

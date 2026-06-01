@@ -89,6 +89,8 @@ function loadInstances() {
       GENIEACS_NBI_PORT         : envConf.GENIEACS_NBI_PORT         || '',
       RADFAST_NBI_GATE_PATH     : envConf.RADFAST_NBI_GATE_PATH     || '',
       RADFAST_NBI_GATE_MAX_CHANGES: envConf.RADFAST_NBI_GATE_MAX_CHANGES || '',
+      // Port publik khusus NBI (opsional) — endpoint REST API terpisah dari dashboard
+      RADFAST_NBI_PROXY_PORT    : envConf.RADFAST_NBI_PROXY_PORT    || '',
     };
 
     if (!merged.RADFAST_PROXY_PORT || !merged.RADFAST_UI_INTERNAL) {
