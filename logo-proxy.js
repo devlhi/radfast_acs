@@ -1923,7 +1923,8 @@ const server = http.createServer((req, res) => {
                         ok: true,
                         secretPath: nbiGateCurrentPath,
                         changesLeft: nbiGateChangesLeft,
-                        maxChanges: NBI_GATE_MAX_CHANGES
+                        maxChanges: NBI_GATE_MAX_CHANGES,
+                        nbiProxyPort: NBI_PROXY_PORT || 0
                     }));
                     return;
                 }
@@ -1940,7 +1941,8 @@ const server = http.createServer((req, res) => {
                         ok: true,
                         secretPath: nbiGateCurrentPath,
                         changesLeft: nbiGateChangesLeft,
-                        maxChanges: NBI_GATE_MAX_CHANGES
+                        maxChanges: NBI_GATE_MAX_CHANGES,
+                        nbiProxyPort: NBI_PROXY_PORT || 0
                     }));
                     return;
                 }
