@@ -47,11 +47,13 @@ DRY_RUN=false
 ONLY_INSTANCE=""
 ADMIN_URL=""
 ADMIN_KEY=""
+NO_VPN=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run)   DRY_RUN=true; shift ;;
         --admin-url) ADMIN_URL="${2:-}"; shift 2 ;;
         --admin-key) ADMIN_KEY="${2:-}"; shift 2 ;;
+        --no-vpn)    NO_VPN=true; shift ;;
         -*)          error "Opsi tidak dikenal: $1" ;;
         *)           ONLY_INSTANCE="$1"; shift ;;
     esac
@@ -59,16 +61,58 @@ done
 
 $DRY_RUN && warn "MODE DRY-RUN: hanya menampilkan rencana, tidak mengubah apa pun."
 
+# ── Auto-deteksi ENV VPN dari instalasi RadFast Admin di server ─────────────
+# Tujuan: cukup jalankan `sudo bash retrofit-instances.sh` tanpa argumen,
+# script cari sendiri URL panel + API key. Sumber:
+#   - API key : backend/data/provisioning-api.json (kalau dirotasi via dashboard)
+#               ATAU PROVISIONING_API_KEY di backend/.env
+#   - URL     : http://127.0.0.1:<PORT backend>  (default 9000)
+ADMIN_BACKEND_DIR=""
+for d in /opt/radfast-admin/backend /opt/radfast_admin/backend /root/radfast-admin/backend; do
+    [[ -f "$d/.env" || -f "$d/config.js" ]] && { ADMIN_BACKEND_DIR="$d"; break; }
+done
+
+read_env_val() { # file key
+    [[ -f "$1" ]] || { echo ""; return; }
+    grep -E "^$2=" "$1" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '[:space:]' || true
+}
+
+if ! $NO_VPN && [[ -z "$ADMIN_KEY" && -n "$ADMIN_BACKEND_DIR" ]]; then
+    # 1) API key dari file rotasi dashboard (prioritas), lalu fallback ke .env
+    KEY_FILE="$ADMIN_BACKEND_DIR/data/provisioning-api.json"
+    if [[ -f "$KEY_FILE" ]]; then
+        DET_KEY=$(grep -oP '"apiKey"\s*:\s*"\K[^"]+' "$KEY_FILE" 2>/dev/null | head -n1 || true)
+        [[ -n "$DET_KEY" ]] && ADMIN_KEY="$DET_KEY" && info "API key terdeteksi dari dashboard store."
+    fi
+    if [[ -z "$ADMIN_KEY" ]]; then
+        DET_KEY=$(read_env_val "$ADMIN_BACKEND_DIR/.env" PROVISIONING_API_KEY)
+        [[ -n "$DET_KEY" ]] && ADMIN_KEY="$DET_KEY" && info "API key terdeteksi dari backend/.env."
+    fi
+    # 2) URL panel: localhost + port backend
+    if [[ -z "$ADMIN_URL" ]]; then
+        DET_PORT=$(read_env_val "$ADMIN_BACKEND_DIR/.env" PORT)
+        [[ -z "$DET_PORT" ]] && DET_PORT=9000
+        ADMIN_URL="http://127.0.0.1:${DET_PORT}"
+        info "URL panel diset otomatis: ${ADMIN_URL}"
+    fi
+fi
+
 SET_VPN=false
-if [[ -n "$ADMIN_URL" || -n "$ADMIN_KEY" ]]; then
-    [[ -z "$ADMIN_URL" ]] && error "--admin-url wajib diisi bila --admin-key diberikan."
-    [[ -z "$ADMIN_KEY" ]] && error "--admin-key wajib diisi bila --admin-url diberikan."
-    # Buang trailing slash agar runtime tinggal append path.
-    ADMIN_URL="${ADMIN_URL%/}"
-    SET_VPN=true
-    info "ENV VPN akan di-set (URL: ${ADMIN_URL}, key: tersembunyi)."
+if $NO_VPN; then
+    info "ENV VPN dilewati (--no-vpn)."
+elif [[ -n "$ADMIN_URL" || -n "$ADMIN_KEY" ]]; then
+    if [[ -z "$ADMIN_KEY" ]]; then
+        warn "API key tidak ditemukan/diisi → ENV VPN dilewati. (set manual: --admin-key <key>)"
+    else
+        [[ -z "$ADMIN_URL" ]] && ADMIN_URL="http://127.0.0.1:9000"
+        # Buang trailing slash agar runtime tinggal append path.
+        ADMIN_URL="${ADMIN_URL%/}"
+        SET_VPN=true
+        info "ENV VPN akan di-set (URL: ${ADMIN_URL}, key: tersembunyi)."
+    fi
 else
-    info "ENV VPN dilewati (jalankan dengan --admin-url & --admin-key untuk set)."
+    warn "ENV VPN dilewati: instalasi RadFast Admin tidak terdeteksi & --admin-key kosong."
+    warn "  Set manual: --admin-url <url> --admin-key <key>, atau --no-vpn untuk lewati."
 fi
 
 # ── Kumpulkan SEMUA port yang sedang dipakai ────────────────
