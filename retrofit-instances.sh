@@ -94,9 +94,12 @@ reserve_port() {
 }
 
 # ── Baca / set nilai di .env ────────────────────────────────
+# CATATAN: tambahkan `|| true` di akhir pipeline. Tanpa ini, saat key belum
+# ada, grep exit 1 → `set -o pipefail` bikin command substitution gagal →
+# `set -e` menghentikan script diam-diam (gejala: berhenti di "Instance xxx").
 get_env() {
     local file="$1" key="$2"
-    grep -E "^${key}=" "$file" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '[:space:]'
+    grep -E "^${key}=" "$file" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '[:space:]' || true
 }
 
 # Set/replace value di .env (in-place, aman untuk karakter URL).
