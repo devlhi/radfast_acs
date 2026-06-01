@@ -1236,8 +1236,9 @@ const NAV_INJECT = String.raw`<script>
     var listEl=body.querySelector('#rf-vpn-body');
     var refresh=body.querySelector('#rf-vpn-refresh');
 
-    function badge(reachable,tunnel){
+    function badge(reachable,tunnel,hasOnt){
       if(tunnel!=='up') return '<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:#eee;color:#777;font-size:11px;font-weight:bold">tunnel down</span>';
+      if(!hasOnt) return '<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:#e6f0fb;color:#2563a8;font-size:11px;font-weight:bold">\u25CF connected</span>';
       return reachable
         ? '<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:#e6f5ea;color:#1f7a3d;font-size:11px;font-weight:bold">\u25CF online</span>'
         : '<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:#fdeaea;color:#b13434;font-size:11px;font-weight:bold">\u25CF unreachable</span>';
@@ -1247,15 +1248,16 @@ const NAV_INJECT = String.raw`<script>
       if(!items.length) return '<tr><td colspan="6" style="padding:10px;color:#999;text-align:center">Belum ada akun '+kind+'.</td></tr>';
       return items.map(function(it){
         var name=esc(it.username||it.name||'-');
-        var ip=esc(it.ont_ip||'-');
+        var ip=esc(it.peer_ip||it.vpn_ip||'-');
         var subnet=esc(it.lan_subnet||'-');
         var rawName=(it.username||it.name||'');
+        var hasOnt=!!(it.ont_ip);
         var k=(kind==='WireGuard')?'wireguard':'l2tp';
         return '<tr style="border-top:1px solid #eee">'+
           '<td style="padding:7px 8px;font-weight:bold">'+name+'</td>'+
           '<td style="padding:7px 8px;font-family:monospace;font-size:12px">'+ip+'</td>'+
           '<td style="padding:7px 8px;font-family:monospace;font-size:12px">'+subnet+'</td>'+
-          '<td style="padding:7px 8px">'+badge(it.ont_reachable,it.tunnel)+'</td>'+
+          '<td style="padding:7px 8px">'+badge(it.ont_reachable,it.tunnel,hasOnt)+'</td>'+
           '<td style="padding:7px 8px;text-align:right">'+rttTxt(it.ont_rtt_ms)+'</td>'+
           '<td style="padding:7px 8px;text-align:right">'+
             '<button class="rf-route-btn" data-kind="'+k+'" data-name="'+esc(rawName)+'" data-subnet="'+esc(it.lan_subnet||'')+'" data-ip="'+esc(it.ont_ip||'')+'" '+
