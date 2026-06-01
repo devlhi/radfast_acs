@@ -52,18 +52,35 @@ USED_PORTS=$(all_used_ports | sort -un)
 
 is_used() { echo "$USED_PORTS" | grep -qx "$1"; }
 
-next_free_from() {
+# Cari port bebas mulai dari $1, lalu RESERVASI ke USED_PORTS.
+# PENTING: fungsi ini TIDAK boleh dipanggil via command substitution
+# ( VAR=$(reserve_port ...) ) karena subshell membuat update USED_PORTS
+# hilang → port berikutnya bisa terpilih sama. Hasil ditaruh di RESERVED_PORT.
+reserve_port() {
     local p=$1
     while is_used "$p"; do p=$((p + 1)); done
     USED_PORTS=$(printf "%s\n%s" "$USED_PORTS" "$p" | sort -un)
-    echo "$p"
+    RESERVED_PORT="$p"
 }
 
-# Port public (yang diakses user)
-UI_PORT=$(next_free_from 3001)
-CWMP_PORT=$(next_free_from 7548)
-NBI_PORT=$(next_free_from 7558)
-FS_PORT=$(next_free_from 7568)
+# Port public (yang diakses user). Dialokasikan berurutan di shell yang sama
+# agar tiap port langsung tercatat sebagai "used" sebelum alokasi berikutnya.
+reserve_port 3001; UI_PORT="$RESERVED_PORT"
+reserve_port 7548; CWMP_PORT="$RESERVED_PORT"
+reserve_port 7558; NBI_PORT="$RESERVED_PORT"
+reserve_port 7568; FS_PORT="$RESERVED_PORT"
+
+# ── Sanity check: keempat port WAJIB unik ────────────────────
+# Guard defense-in-depth: kalau ada bug/edge-case yang bikin port tabrakan,
+# stop di sini daripada menulis .env rusak (NBI nyasar ke CWMP → 405).
+_dup_check=$(printf '%s\n' "$UI_PORT" "$CWMP_PORT" "$NBI_PORT" "$FS_PORT" | sort | uniq -d)
+if [[ -n "$_dup_check" ]]; then
+    error "Alokasi port tabrakan (UI=$UI_PORT CWMP=$CWMP_PORT NBI=$NBI_PORT FS=$FS_PORT). Port duplikat: $(echo "$_dup_check" | tr '\n' ' ')"
+fi
+# UI_INTERNAL juga harus tidak bentrok dengan port lain (jarang, tapi jaga-jaga)
+for _p in "$UI_PORT" "$CWMP_PORT" "$NBI_PORT" "$FS_PORT"; do
+    [[ "$_p" -ge 1024 && "$_p" -le 65535 ]] || error "Port di luar rentang valid: $_p"
+done
 
 # Port internal GenieACS UI (dipakai logo-proxy, user tidak akses langsung)
 # Pakai rentang 13000+ supaya tidak bentrok
