@@ -1340,122 +1340,64 @@ const NAV_INJECT = String.raw`<script>
   /* ESC key */
   document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeModal(); });
 
-  /* ── Posisikan tombol SEJAJAR dengan tab nav (Overview, dll) ── */
-  /* MutationObserver handle Mithril re-render otomatis */
-  /* ── Posisikan tombol di KANAN tab Admin (paling kanan header) ── */
-  function alignToNav(b){
-    // Cari tab Admin (terakhir di nav)
-    var adminLink = document.querySelector('#header a[href*="admin"]');
-    if(!adminLink){
-      // Fallback: link terakhir di #header
-      var all = document.querySelectorAll('#header a');
-      adminLink = all.length ? all[all.length - 1] : null;
-    }
-    if(!adminLink){ b.style.display='none'; return; }
-    var ar = adminLink.getBoundingClientRect();
-    var btnH = ar.height || 22;
-    b.style.opacity   = '0';
-    b.style.display   = '';
-    b.style.position  = 'fixed';
-    // Vertikal: sejajar tengah tab Admin
-    b.style.top       = Math.round(ar.top + (ar.height - btnH) / 2) + 'px';
-    // Horizontal: offset di kanan tab Admin (offsetPx untuk tombol kedua)
-    b.style.left      = Math.round(ar.right + 6 + (b._rfOffset || 0)) + 'px';
-    b.style.right     = 'auto';
-    b.style.height    = btnH + 'px';
-    b.style.lineHeight= btnH + 'px';
-    b.style.opacity   = '1';
+  /* ── Inject tombol sebagai TAB asli di dalam nav GenieACS ── */
+  /* Tidak pakai position:fixed (yang bikin flicker / kadang hilang saat Mithril
+     render ulang). Tombol dibuat jadi <li> di dalam <ul> nav, sehingga menyatu
+     dengan tab asli (Overview, Devices, Faults, Admin) dan ikut flow header. */
+
+  // Cari <ul> daftar tab di dalam header.
+  function navUl(){
+    return document.querySelector('#header > nav > ul') ||
+           document.querySelector('#header nav ul');
   }
 
-  // Drawer staging/queue GenieACS terbuka? (saat edit parameter, queue task, dll)
-  // Drawer collapsed = height ~0; saat terbuka height > 0 dan menutupi area tombol.
-  function drawerOpen(){
-    var dw = document.querySelector('#header .drawer-wrapper .drawer');
-    if(!dw) return false;
-    return dw.getBoundingClientRect().height > 5;
+  // Buat satu tab (li>a) bergaya sama dengan tab GenieACS + garis aksen warna.
+  function makeTab(id, label, accent, onClick){
+    var li = document.createElement('li');
+    li.id = id;
+    li.className = 'rf-nav-tab';
+    // Garis bawah berwarna sebagai penanda tombol khusus, sisanya ikut gaya tab.
+    li.style.cssText = 'border-bottom:3px solid ' + accent + ';';
+    var a = document.createElement('a');
+    a.href = '#';
+    a.textContent = label;
+    // min-width:0 supaya tab kita tidak selebar tab bawaan (140px).
+    a.style.cssText = 'min-width:0;cursor:pointer;white-space:nowrap;';
+    a.addEventListener('click', function(e){
+      e.preventDefault(); e.stopPropagation(); onClick();
+    });
+    li.appendChild(a);
+    return li;
   }
 
   function syncBtn(){
-    // Deteksi halaman login GenieACS, abaikan field password milik modal kita
+    // Halaman login GenieACS: jangan tampilkan tab kita.
     var onLogin = !!document.querySelector('input[type="password"]:not(#rf-api-token):not(#rf-finput):not(#rf-vpn-token)');
-    var btn = document.getElementById('rf-nav-btn');
-    var apiBtn = document.getElementById('rf-nav-api');
-    var vpnBtn = document.getElementById('rf-nav-vpn');
-    // Sembunyikan tombol saat di login ATAU saat drawer staging/queue GenieACS terbuka,
-    // supaya tidak menutupi tombol Commit/Clear/Queue/Cancel milik GenieACS.
-    if(onLogin || drawerOpen()){
-      if(btn) btn.style.display='none';
-      if(apiBtn) apiBtn.style.display='none';
-      if(vpnBtn) vpnBtn.style.display='none';
+    var ul = navUl();
+    var ids = ['rf-nav-btn', 'rf-nav-api', 'rf-nav-vpn'];
+    if(onLogin || !ul){
+      ids.forEach(function(id){ var el = document.getElementById(id); if(el) el.remove(); });
       return;
     }
-    if(!btn){
-      btn = document.createElement('span');
-      btn.id = 'rf-nav-btn';
-      btn.setAttribute('style',
-        'position:fixed;z-index:2147483647;display:none;' +
-        'background:#c0392b;color:#fff;border-radius:3px;padding:0 8px;' +
-        'font-weight:bold;font-size:11px;font-family:Arial,sans-serif;' +
-        'user-select:none;white-space:nowrap;cursor:pointer;' +
-        'letter-spacing:0.3px;box-shadow:0 1px 3px rgba(0,0,0,.25);'
-      );
-      btn.innerHTML='\u270E Ganti Logo';
-      btn.addEventListener('click', function(e){
-        e.preventDefault(); e.stopPropagation(); openModal();
-      });
-      document.documentElement.appendChild(btn);
+    // (Re)inject tab bila Mithril menghapusnya saat render ulang header.
+    if(!document.getElementById('rf-nav-btn')){
+      ul.appendChild(makeTab('rf-nav-btn', '\u270E Ganti Logo', '#c0392b', openModal));
     }
-    if(!apiBtn){
-      apiBtn = document.createElement('span');
-      apiBtn.id = 'rf-nav-api';
-      apiBtn.setAttribute('style',
-        'position:fixed;z-index:2147483647;display:none;' +
-        'background:#2980b9;color:#fff;border-radius:3px;padding:0 8px;' +
-        'font-weight:bold;font-size:11px;font-family:Arial,sans-serif;' +
-        'user-select:none;white-space:nowrap;cursor:pointer;' +
-        'letter-spacing:0.3px;box-shadow:0 1px 3px rgba(0,0,0,.25);'
-      );
-      apiBtn.innerHTML='\uD83D\uDD11 API URL';
-      apiBtn.addEventListener('click', function(e){
-        e.preventDefault(); e.stopPropagation(); openApiModal();
-      });
-      document.documentElement.appendChild(apiBtn);
+    if(!document.getElementById('rf-nav-api')){
+      ul.appendChild(makeTab('rf-nav-api', '\uD83D\uDD11 API URL', '#2980b9', openApiModal));
     }
-    if(!vpnBtn){
-      vpnBtn = document.createElement('span');
-      vpnBtn.id = 'rf-nav-vpn';
-      vpnBtn.setAttribute('style',
-        'position:fixed;z-index:2147483647;display:none;' +
-        'background:#16a085;color:#fff;border-radius:3px;padding:0 8px;' +
-        'font-weight:bold;font-size:11px;font-family:Arial,sans-serif;' +
-        'user-select:none;white-space:nowrap;cursor:pointer;' +
-        'letter-spacing:0.3px;box-shadow:0 1px 3px rgba(0,0,0,.25);'
-      );
-      vpnBtn.innerHTML='\uD83D\uDCF6 Status VPN';
-      vpnBtn.addEventListener('click', function(e){
-        e.preventDefault(); e.stopPropagation(); openVpnModal();
-      });
-      document.documentElement.appendChild(vpnBtn);
+    if(!document.getElementById('rf-nav-vpn')){
+      ul.appendChild(makeTab('rf-nav-vpn', '\uD83D\uDCF6 Status VPN', '#16a085', openVpnModal));
     }
-    // Posisikan: Logo tepat di kanan Admin, API di kanan Logo, VPN di kanan API
-    btn._rfOffset = 0;
-    alignToNav(btn);
-    var logoW = btn.getBoundingClientRect().width || 78;
-    apiBtn._rfOffset = logoW + 6;
-    alignToNav(apiBtn);
-    var apiW = apiBtn.getBoundingClientRect().width || 70;
-    vpnBtn._rfOffset = logoW + 6 + apiW + 6;
-    alignToNav(vpnBtn);
   }
 
   /* ── Startup: MutationObserver + resize listener ── */
   function startBtn(){
     syncBtn();
-    // Observer deteksi Mithril render ulang header → realign tombol
-    var lastHdr = null;
+    // Observer deteksi Mithril render ulang header → re-inject tab bila terhapus
     var observer = new MutationObserver(function(){ syncBtn(); });
     var hdr = document.getElementById('header');
-    if(hdr){ observer.observe(hdr, {childList:true, subtree:true}); lastHdr=hdr; }
+    if(hdr){ observer.observe(hdr, {childList:true, subtree:true}); }
     // Juga watch body untuk case header muncul lambat
     observer.observe(document.body, {childList:true, subtree:true});
     // Resize listener
