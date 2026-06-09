@@ -42,14 +42,39 @@ fi
 
 USERNAME=$(echo "$USERNAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')
 [[ -z "$USERNAME" ]]              && error "Username tidak valid!"
-[[ ! -d "$INSTANCES_DIR/$USERNAME" ]] && error "Instance '$USERNAME' tidak ditemukan!"
+
+# Idempotent: kalau folder instance sudah tidak ada TAPI masih tercatat di
+# registry / masih ada service / unit file, jangan langsung error. Lanjutkan
+# pembersihan supaya instance "nyangkut" bisa dibersihkan dari panel.
+INST_EXISTS=true
+[[ ! -d "$INSTANCES_DIR/$USERNAME" ]] && INST_EXISTS=false
+
+IN_REGISTRY=false
+[[ -f "$REGISTRY" ]] && grep -q "^${USERNAME} " "$REGISTRY" 2>/dev/null && IN_REGISTRY=true
+
+HAS_UNIT=false
+ls /etc/systemd/system/genieacs-${USERNAME}-*.service &>/dev/null 2>&1 && HAS_UNIT=true
+
+if [[ "$INST_EXISTS" == false ]]; then
+    if [[ "$IN_REGISTRY" == false && "$HAS_UNIT" == false ]]; then
+        error "Instance '$USERNAME' tidak ditemukan!"
+    fi
+    warn "Folder instance '$USERNAME' sudah tidak ada — membersihkan sisa registry/service."
+fi
 
 INST_DIR="$INSTANCES_DIR/$USERNAME"
 DB_NAME="genieacs_${USERNAME}"
 
 # Ambil info dari .env (UI = port publik proxy, bukan port internal GenieACS)
-UI_PORT=$(grep -oP 'RADFAST_PROXY_PORT=\K[0-9]+' "$INST_DIR/.env" 2>/dev/null || echo "?")
-CWMP_PORT=$(grep -oP 'GENIEACS_CWMP_PORT=\K[0-9]+' "$INST_DIR/.env" 2>/dev/null || echo "?")
+# Folder mungkin sudah tidak ada (mode cleanup) → fallback "?".
+if [[ -f "$INST_DIR/.env" ]]; then
+    UI_PORT=$(grep -oP 'RADFAST_PROXY_PORT=\K[0-9]+' "$INST_DIR/.env" 2>/dev/null || echo "?")
+    CWMP_PORT=$(grep -oP 'GENIEACS_CWMP_PORT=\K[0-9]+' "$INST_DIR/.env" 2>/dev/null || echo "?")
+else
+    # Coba ambil dari registry sebagai fallback
+    UI_PORT=$(grep "^${USERNAME} " "$REGISTRY" 2>/dev/null | grep -oP 'UI=\K[0-9]+' || echo "?")
+    CWMP_PORT=$(grep "^${USERNAME} " "$REGISTRY" 2>/dev/null | grep -oP 'CWMP=\K[0-9]+' || echo "?")
+fi
 
 # ── Konfirmasi ───────────────────────────────────────────────
 echo ""
@@ -100,13 +125,19 @@ else
 fi
 
 # ── Hapus folder instance ────────────────────────────────────
-rm -rf "$INST_DIR"
-success "Folder $INST_DIR dihapus"
+if [[ -d "$INST_DIR" ]]; then
+    rm -rf "$INST_DIR"
+    success "Folder $INST_DIR dihapus"
+fi
 
 # ── Update registry ──────────────────────────────────────────
+# CATATAN: jangan pakai `grep -v ... && mv || rm`. grep -v keluar dengan
+# exit code 1 kalau TIDAK ada baris yang lolos (mis. ini instance terakhir,
+# hasil 0 baris) → cabang && mv terlewat → registry tidak terupdate dan
+# instance "nyangkut" tidak bisa dihapus dari panel. Pakai if eksplisit.
 if [[ -f "$REGISTRY" ]]; then
-    grep -v "^${USERNAME} " "$REGISTRY" > "${REGISTRY}.tmp" 2>/dev/null \
-        && mv "${REGISTRY}.tmp" "$REGISTRY" || rm -f "${REGISTRY}.tmp"
+    grep -v "^${USERNAME} " "$REGISTRY" > "${REGISTRY}.tmp" 2>/dev/null || true
+    mv "${REGISTRY}.tmp" "$REGISTRY"
 fi
 success "Registry diupdate"
 
