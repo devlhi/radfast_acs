@@ -180,6 +180,11 @@ success ".env dibuat"
 
 # ── Import MongoDB ───────────────────────────────────────────
 CONF_DIR="$APP_DIR/conf-acs"
+
+# Node binary dibutuhkan untuk fallback import & proxy. Deteksi lebih awal.
+NODE_BIN=$(command -v node 2>/dev/null || echo "/usr/bin/node")
+[[ ! -f "$NODE_BIN" ]] && error "node binary tidak ditemukan!"
+
 if [[ -d "$CONF_DIR" ]]; then
     if command -v mongorestore &>/dev/null; then
         info "Import MongoDB → database: $DB_NAME..."
@@ -187,15 +192,29 @@ if [[ -d "$CONF_DIR" ]]; then
             | grep -E "done|error|finish|inserted|documents" || true
         success "MongoDB diimport ke $DB_NAME"
     else
-        warn "mongorestore tidak ditemukan — skip import MongoDB"
+        # Fallback: mongorestore tidak ada → pakai importer Node.js bawaan
+        # (memakai dependency mongodb+bson milik genieacs-app). Tanpa ini,
+        # DB instance baru kosong → tidak ada user 'admin' → login GAGAL.
+        IMPORT_SCRIPT=""
+        for loc in "$REPO_DIR/import-bson.js" "$(dirname "$0")/import-bson.js" "/opt/radfast_acs/import-bson.js"; do
+            [[ -f "$loc" ]] && IMPORT_SCRIPT="$loc" && break
+        done
+        if [[ -n "$IMPORT_SCRIPT" ]]; then
+            warn "mongorestore tidak ada — fallback import via Node ($IMPORT_SCRIPT)"
+            info "Import MongoDB → database: $DB_NAME..."
+            # Jalankan dari $APP_DIR supaya require('mongodb'/'bson') ketemu node_modules
+            if ( cd "$APP_DIR" && "$NODE_BIN" "$IMPORT_SCRIPT" "$CONF_DIR" "$DB_NAME" "mongodb://127.0.0.1:27017" ); then
+                success "MongoDB diimport ke $DB_NAME (via Node fallback)"
+            else
+                warn "Fallback import GAGAL — login dashboard instance mungkin tidak bisa! Cek log di atas."
+            fi
+        else
+            warn "mongorestore & import-bson.js tidak ditemukan — skip import MongoDB (login bisa gagal!)"
+        fi
     fi
 else
     warn "conf-acs tidak ditemukan di $APP_DIR — skip import MongoDB"
 fi
-
-# ── Cari node & proxy script ─────────────────────────────────
-NODE_BIN=$(command -v node 2>/dev/null || echo "/usr/bin/node")
-[[ ! -f "$NODE_BIN" ]] && error "node binary tidak ditemukan!"
 
 # Cari logo-proxy.js
 PROXY_SCRIPT=""
