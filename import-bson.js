@@ -20,6 +20,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const { createRequire } = require('module')
 
 function die(msg, code = 1) {
   process.stderr.write(`[import-bson] ERROR: ${msg}\n`)
@@ -40,18 +41,49 @@ if (!/^[a-zA-Z0-9_]+$/.test(dbName)) {
   die(`Nama database tidak valid: ${dbName}`)
 }
 
-let MongoClient
-let BSON
-try {
-  ;({ MongoClient } = require('mongodb'))
-  BSON = require('bson')
-} catch (e) {
+// ── Load dependency mongodb + bson ─────────────────────────────────────
+// Node me-resolve require() relatif terhadap LOKASI FILE INI, bukan cwd.
+// Itu berarti `cd $APP_DIR` di shell tidak membantu. Kita harus eksplisit
+// pakai createRequire yang menunjuk ke node_modules milik genieacs-app.
+function loadDeps() {
+  // 1) Coba require langsung (berhasil kalau import-bson.js sudah berada
+  //    di pohon yang punya node_modules — jarang, tapi murah dicoba).
+  try {
+    return {
+      MongoClient: require('mongodb').MongoClient,
+      BSON: require('bson'),
+    }
+  } catch (_) {}
+
+  // 2) Fallback: pakai createRequire dengan jangkar di package.json app.
+  const candidates = [
+    process.env.RADFAST_APP_DIR,
+    '/opt/genieacs-app',
+    process.cwd(),
+  ].filter(Boolean)
+
+  const tried = []
+  for (const dir of candidates) {
+    const anchor = path.join(dir, 'package.json')
+    tried.push(anchor)
+    if (!fs.existsSync(anchor)) continue
+    try {
+      const req = createRequire(anchor)
+      return {
+        MongoClient: req('mongodb').MongoClient,
+        BSON: req('bson'),
+      }
+    } catch (_) {}
+  }
+
   die(
-    'Dependency "mongodb"/"bson" tidak ditemukan. Jalankan dari folder ' +
-      'genieacs-app (yang punya node_modules), atau install dulu. Detail: ' +
-      e.message,
+    'Tidak bisa load dependency "mongodb"/"bson". Lokasi yang dicoba:\n  - ' +
+      tried.join('\n  - ') +
+      '\nSet env RADFAST_APP_DIR ke folder genieacs-app yang punya node_modules.',
   )
 }
+
+const { MongoClient, BSON } = loadDeps()
 
 // Decode satu file .bson (rangkaian dokumen BSON yang di-concat) → array dokumen.
 // Tiap dokumen diawali 4 byte little-endian panjang totalnya (termasuk 4 byte itu).

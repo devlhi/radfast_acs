@@ -202,8 +202,12 @@ if [[ -d "$CONF_DIR" ]]; then
         if [[ -n "$IMPORT_SCRIPT" ]]; then
             warn "mongorestore tidak ada — fallback import via Node ($IMPORT_SCRIPT)"
             info "Import MongoDB → database: $DB_NAME..."
-            # Jalankan dari $APP_DIR supaya require('mongodb'/'bson') ketemu node_modules
-            if ( cd "$APP_DIR" && "$NODE_BIN" "$IMPORT_SCRIPT" "$CONF_DIR" "$DB_NAME" "mongodb://127.0.0.1:27017" ); then
+            # PENTING: Node me-resolve require() relatif ke LOKASI import-bson.js
+            # (mis. /opt/radfast_acs), bukan cwd. Jadi `cd $APP_DIR` saja TIDAK
+            # cukup — importer harus diberi tahu di mana node_modules genieacs-app
+            # lewat env RADFAST_APP_DIR. Tanpa ini require('mongodb') gagal,
+            # DB tidak ter-seed, dan dashboard GenieACS cuma redirect ke login.
+            if RADFAST_APP_DIR="$APP_DIR" "$NODE_BIN" "$IMPORT_SCRIPT" "$CONF_DIR" "$DB_NAME" "mongodb://127.0.0.1:27017"; then
                 success "MongoDB diimport ke $DB_NAME (via Node fallback)"
             else
                 warn "Fallback import GAGAL — login dashboard instance mungkin tidak bisa! Cek log di atas."
