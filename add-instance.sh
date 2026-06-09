@@ -220,6 +220,79 @@ else
     warn "conf-acs tidak ditemukan di $APP_DIR — skip import MongoDB"
 fi
 
+# ── Pastikan user 'admin' ada (idempotent) ───────────────────
+# Berapa pun hasil import di atas, kita garansi user admin/admin tersedia.
+# Ini menutup semua kegagalan import: BSON parsing rusak, _id ter-replace
+# ObjectId, atau koleksi users entah kenapa kosong. Tanpa ini, dashboard
+# GenieACS hanya redirect ke /login dan login admin/admin gagal.
+#
+# Algoritma password GenieACS UI (dari source asli):
+#   pbkdf2(password, salt, 10000, 128, 'sha512') → hex 256 char
+ensure_admin_via_node() {
+    local _db="$1" _user="${2:-admin}" _pass="${3:-admin}"
+    RADFAST_APP_DIR="$APP_DIR" "$NODE_BIN" -e "
+const path = require('path');
+const { createRequire } = require('module');
+const anchor = path.join(process.env.RADFAST_APP_DIR, 'package.json');
+const req = createRequire(anchor);
+const { MongoClient } = req('mongodb');
+const crypto = require('crypto');
+
+const dbName  = process.argv[1];
+const username = process.argv[2];
+const password = process.argv[3];
+
+(async () => {
+  const client = new MongoClient('mongodb://127.0.0.1:27017', { serverSelectionTimeoutMS: 15000 });
+  await client.connect();
+  try {
+    const db = client.db(dbName);
+
+    // Generate salt 64 byte (128 hex) seperti seed bawaan, lalu pbkdf2 sha512
+    const salt = crypto.randomBytes(64).toString('hex');
+    const hash = crypto.pbkdf2Sync(password, salt, 10000, 128, 'sha512').toString('hex');
+
+    // Upsert user dengan _id string (bukan ObjectId) — penting karena UI
+    // mencari user via _id == username string.
+    const users = db.collection('users');
+    const existing = await users.findOne({ _id: username });
+    if (existing) {
+      await users.updateOne(
+        { _id: username },
+        { \$set: { password: hash, salt, roles: 'admin' } },
+      );
+      console.log('[ensure-admin] user', username, 'di-update (password di-reset)');
+    } else {
+      await users.insertOne({ _id: username, password: hash, salt, roles: 'admin' });
+      console.log('[ensure-admin] user', username, 'dibuat baru');
+    }
+
+    // Pastikan permissions admin lengkap (resource utama, access level 3 = full).
+    const perms = db.collection('permissions');
+    const resources = ['devices','files','faults','presets','provisions','virtualParameters','users','permissions','config'];
+    for (const r of resources) {
+      const id = 'admin:' + r + ':3';
+      await perms.updateOne(
+        { _id: id },
+        { \$set: { _id: id, role: 'admin', resource: r, access: 3, validate: 'true' } },
+        { upsert: true },
+      );
+    }
+    console.log('[ensure-admin] permissions admin OK (' + resources.length + ' resource)');
+  } finally {
+    await client.close();
+  }
+})().catch(e => { console.error('[ensure-admin] ERROR:', e.message); process.exit(1); });
+" "$_db" "$_user" "$_pass"
+}
+
+if ensure_admin_via_node "$DB_NAME" "admin" "admin"; then
+    success "User admin terjamin ada di $DB_NAME (login: admin / admin)"
+else
+    warn "ensure-admin gagal — login dashboard mungkin tidak bisa. Cek error di atas."
+fi
+
+
 # Cari logo-proxy.js
 PROXY_SCRIPT=""
 for loc in "$REPO_DIR/logo-proxy.js" "$(dirname "$0")/logo-proxy.js" "/opt/radfast_acs/logo-proxy.js"; do
