@@ -185,6 +185,45 @@ CONF_DIR="$APP_DIR/conf-acs"
 NODE_BIN=$(command -v node 2>/dev/null || echo "/usr/bin/node")
 [[ ! -f "$NODE_BIN" ]] && error "node binary tidak ditemukan!"
 
+# ── Sinkronkan conf-acs dari repo (BSON terbaru) ─────────────
+# add-instance.sh meng-import dari $CONF_DIR (= /opt/genieacs-app/conf-acs).
+# Folder itu HANYA disalin sekali oleh setup-system.sh saat install awal.
+# Jadi kalau ada update BSON (mis. virtualParameters baru) yang masuk via
+# `git pull` di repo, $CONF_DIR akan tetap memakai versi lama dan instance
+# baru ikut terbawa lama. Di sini kita auto-sync dari repo → $CONF_DIR
+# sebelum import, kecuali user opt-out lewat env RADFAST_NO_SYNC_CONF=1.
+REPO_CONF_DIR="$REPO_DIR/source-deob/genieacs-app/conf-acs"
+if [[ "${RADFAST_NO_SYNC_CONF:-0}" != "1" ]] && [[ -d "$REPO_CONF_DIR" ]] && [[ -d "$CONF_DIR" ]]; then
+    # Hitung file .bson yang berbeda (ukuran/mtime). Pakai cmp -s untuk
+    # banding byte-per-byte agar akurat tanpa peduli timestamp.
+    diff_count=0
+    while IFS= read -r -d '' src; do
+        rel="${src#$REPO_CONF_DIR/}"
+        dst="$CONF_DIR/$rel"
+        if [[ ! -f "$dst" ]] || ! cmp -s "$src" "$dst"; then
+            diff_count=$((diff_count + 1))
+        fi
+    done < <(find "$REPO_CONF_DIR" -maxdepth 1 -type f -name '*.bson' -print0)
+
+    if [[ "$diff_count" -gt 0 ]]; then
+        info "conf-acs di repo berbeda ($diff_count file) — sync ke $CONF_DIR..."
+        # Backup conf-acs lama sekali (timestamped) sebelum overwrite.
+        BACKUP_CONF="${CONF_DIR}-old-$(date +%Y%m%d%H%M%S)"
+        cp -a "$CONF_DIR" "$BACKUP_CONF" \
+            && success "Backup conf-acs lama → $BACKUP_CONF" \
+            || warn "Gagal backup conf-acs lama — lanjut tanpa backup"
+        # Salin isi (bukan folder-nya) supaya .metadata.json & file lain
+        # ikut. Pakai `/.` agar dotfile ikut tersalin.
+        cp -a "$REPO_CONF_DIR/." "$CONF_DIR/" \
+            && success "conf-acs disinkron dari repo (BSON terbaru aktif)" \
+            || warn "Gagal sinkron conf-acs — instance baru bisa pakai BSON lama"
+    else
+        info "conf-acs sudah sinkron dengan repo (skip sync)"
+    fi
+elif [[ "${RADFAST_NO_SYNC_CONF:-0}" == "1" ]]; then
+    warn "RADFAST_NO_SYNC_CONF=1 — skip sync conf-acs (pakai versi yang ada di $CONF_DIR)"
+fi
+
 if [[ -d "$CONF_DIR" ]]; then
     if command -v mongorestore &>/dev/null; then
         info "Import MongoDB → database: $DB_NAME..."
